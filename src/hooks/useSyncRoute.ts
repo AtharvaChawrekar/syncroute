@@ -106,6 +106,8 @@ export function useChatMessages(_tripId: string) {
 // Replace with: supabase.from('trips').select('*, trip_members(*)').eq('trip_members.user_id', userId)
 
 export const MOCK_TRIPS: Trip[] = [
+    // ── Permanent Safar AI workspace DM (always first, never deletable)
+    { id: "safarDM", name: "Safar AI", description: "Your private AI scratchpad", color: "#6366f1", lastMsg: "Ask me anything about your trip…", unread: 0, active: false, members: ["You"] },
     { id: "trip_1", name: "Goa Trip with College Bros", description: "Beach vibes and adventure!", color: "#3b82f6", lastMsg: "@Safar find us a beach shack!", unread: 3, active: true, members: ["Rahul", "Priya", "You", "Aakash"] },
     { id: "trip_2", name: "Family Europe Tour", description: "Relaxed cultural exploration", color: "#a855f7", lastMsg: "Mom wants to visit the Louvre", unread: 0, active: false, members: ["Mom", "Dad", "You"] },
     { id: "trip_3", name: "Solo Japan Adventure", description: "Finding inner peace in Kyoto", color: "#10b981", lastMsg: "Exploring temples tomorrow", unread: 1, active: false, members: ["You"] },
@@ -123,10 +125,21 @@ export function useTrips() {
 
     const deleteTrip = (id: string) => {
         // TODO: await supabase.from('trips').delete().eq('id', id)
-        setTrips(prev => prev.filter(t => t.id !== id));
+        // Safar DM is permanent — never delete it
+        setTrips(prev => prev.filter(t => t.id !== id && t.id !== "safarDM"));
     };
 
-    return { trips, addTrip, deleteTrip };
+    const addCollaborator = (tripId: string, memberName: string) => {
+        // TODO: await supabase.from('trip_members').insert({ trip_id: tripId, user_id: ... })
+        if (!memberName.trim()) return;
+        setTrips(prev => prev.map(t =>
+            t.id === tripId && !t.members.includes(memberName)
+                ? { ...t, members: [...t.members, memberName] }
+                : t
+        ));
+    };
+
+    return { trips, addTrip, deleteTrip, addCollaborator };
 }
 
 // ─── MOCK HOOK: useProfile ───────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import {
     Settings, Plane, GripVertical, MessageSquare, Users,
     Edit3, Coffee, Mountain, Ship, Camera, UtensilsCrossed,
     X, MoreVertical, Pin, Share2, Trash2, Type, UserPlus,
-    CornerUpLeft, ChevronRight, Check, CloudRain, Clock, Download
+    CornerUpLeft, ChevronRight, Check, CloudRain, Clock, Download, Lock
 } from "lucide-react";
 import { useChatMessages, useTrips, useProfile, type Trip, type Message } from "@/hooks/useSyncRoute";
 
@@ -200,7 +200,7 @@ const ALL_INTERESTS = ["Adventure", "Food", "Photography", "Beach", "Culture", "
 export default function Dashboard() {
     // ─── DATA HOOKS ────────────────────────────────────────────────
     const { messages, sendMessage } = useChatMessages("trip_1");
-    const { trips, addTrip, deleteTrip } = useTrips();
+    const { trips, addTrip, deleteTrip, addCollaborator } = useTrips();
     const { profile, updateProfile } = useProfile();
 
     // ─── UI STATE ──────────────────────────────────────────────────
@@ -208,7 +208,7 @@ export default function Dashboard() {
     const [messageInput, setMessageInput] = useState("");
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [itineraryOpen, setItineraryOpen] = useState(true);
-    const [activeTrip, setActiveTrip] = useState("trip_1");
+    const [activeTrip, setActiveTrip] = useState("safarDM");
 
     // Swipe-to-Reply
     const [replyTo, setReplyTo] = useState<Message | null>(null);
@@ -237,13 +237,16 @@ export default function Dashboard() {
 
     // ─── MODAL STATE ───────────────────────────────────────────────
     const [modal, setModal] = useState<
-        "createGroup" | "profile" | "addCollaborator" | "groupSettings" | null
+        "createTrip" | "profile" | "addCollaborator" | "groupSettings" | null
     >(null);
 
-    // Create group form
-    const [newGroupName, setNewGroupName] = useState("");
-    const [newGroupDesc, setNewGroupDesc] = useState("");
-    const [newGroupColor, setNewGroupColor] = useState(THEME_COLORS[0]);
+    // Create trip form
+    const [newTripName, setNewTripName] = useState("");
+    const [newTripVibe, setNewTripVibe] = useState("");
+    const [newTripColor, setNewTripColor] = useState(THEME_COLORS[0]);
+
+    // Add collaborator form
+    const [collaboratorName, setCollaboratorName] = useState("");
 
     // ─── HANDLERS ──────────────────────────────────────────────────
     const handleSend = () => {
@@ -278,10 +281,17 @@ export default function Dashboard() {
         setMentionQuery(null);
     };
 
-    const handleCreateGroup = () => {
-        if (!newGroupName.trim()) return;
-        addTrip(newGroupName, newGroupDesc, newGroupColor);
-        setNewGroupName(""); setNewGroupDesc(""); setNewGroupColor(THEME_COLORS[0]);
+    const handleCreateTrip = () => {
+        if (!newTripName.trim()) return;
+        addTrip(newTripName, newTripVibe, newTripColor);
+        setNewTripName(""); setNewTripVibe(""); setNewTripColor(THEME_COLORS[0]);
+        setModal(null);
+    };
+
+    const handleAddCollaborator = () => {
+        if (!collaboratorName.trim()) return;
+        addCollaborator(activeTrip, collaboratorName.trim());
+        setCollaboratorName("");
         setModal(null);
     };
 
@@ -317,6 +327,11 @@ export default function Dashboard() {
     };
 
     const activeTripData = trips.find(t => t.id === activeTrip);
+    // ─── DERIVED STATE ─────────────────────────────────────────────
+    const isSafarDM = activeTrip === "safarDM";
+    const isShared = (activeTripData?.members.length ?? 0) > 1;
+    // Members excluding "You" for subtitle display
+    const otherMembers = activeTripData?.members.filter(m => m !== "You") ?? [];
 
     return (
         <div className="h-screen flex flex-col bg-[#F5F7FA] dark:bg-[#0D0D0D] font-sans transition-colors" onClick={() => setOpenDropdown(null)}>
@@ -362,27 +377,55 @@ export default function Dashboard() {
                             <div className="p-4 space-y-3">
                                 <div className="relative">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                    <input placeholder="Search conversations…"
+                                    <input placeholder="Search trips…"
                                         className="w-full h-10 pl-10 pr-4 rounded-xl bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500/30 transition-colors" />
                                 </div>
-                                <button onClick={() => setModal("createGroup")}
+                                <button onClick={() => setModal("createTrip")}
                                     className="w-full h-10 flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-md shadow-blue-500/20 cursor-pointer transition-all hover:scale-[1.02]">
-                                    <Plus className="w-4 h-4" /> New Group / Add Person
+                                    <Plus className="w-4 h-4" /> New Trip
                                 </button>
                             </div>
 
-                            {/* Group List */}
+                            {/* ── WORKSPACE (pinned Safar DM) ── */}
+                            <div className="px-4 pb-1">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-1.5">Workspace</p>
+                                {trips.filter(t => t.id === "safarDM").map(g => (
+                                    <div key={g.id}
+                                        onClick={() => setActiveTrip(g.id)}
+                                        className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${g.id === activeTrip
+                                            ? "bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20"
+                                            : "hover:bg-gray-50 dark:hover:bg-white/5 border border-transparent"
+                                            }`}>
+                                        <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-sm" style={{ backgroundColor: g.color }}>
+                                            <Sparkles className="w-4 h-4 text-white" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className={`text-sm font-semibold truncate ${g.id === activeTrip ? "text-indigo-600 dark:text-indigo-400" : "text-gray-800 dark:text-gray-200"}`}>{g.name}</p>
+                                            <p className="text-[11px] text-gray-400 truncate">Private AI scratchpad</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* ── YOUR TRIPS ── */}
+                            <div className="px-4 pt-3 pb-1">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-1.5">Your Trips</p>
+                            </div>
                             <div className="flex-1 overflow-y-auto px-2 space-y-1">
-                                {trips.map((g) => (
+                                {trips.filter(t => t.id !== "safarDM").map((g) => (
                                     <div key={g.id} className={`relative flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer ${g.id === activeTrip
                                         ? "bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20"
                                         : "hover:bg-gray-50 dark:hover:bg-white/5 border border-transparent"}`}
                                         onClick={() => setActiveTrip(g.id)}>
                                         <GroupAvatar name={g.name} color={g.color} />
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex justify-between items-center">
+                                            <div className="flex items-center gap-1.5">
                                                 <p className={`text-sm font-semibold truncate ${g.id === activeTrip ? "text-blue-700 dark:text-blue-400" : "text-gray-800 dark:text-gray-200"}`}>{g.name}</p>
-                                                {g.unread > 0 && <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">{g.unread}</span>}
+                                                {/* Private / Shared indicator */}
+                                                {g.members.length === 1
+                                                    ? <Lock className="w-3 h-3 text-gray-400 shrink-0" />
+                                                    : <Users className="w-3 h-3 text-blue-400 shrink-0" />}
+                                                {g.unread > 0 && <span className="ml-auto w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">{g.unread}</span>}
                                             </div>
                                             <p className="text-xs text-gray-500 truncate mt-0.5">{g.lastMsg}</p>
                                         </div>
@@ -442,24 +485,49 @@ export default function Dashboard() {
                 {/* ════════════ CENTER: CHAT ════════════ */}
                 <main className="flex-1 flex flex-col min-w-0 bg-gray-50 dark:bg-[#0D0D0D]">
 
-                    {/* Chat Header */}
+                    {/* Chat Header — 3 dynamic states */}
                     <div className="h-14 flex items-center justify-between px-5 bg-white dark:bg-[#141414] border-b border-gray-200 dark:border-white/5 shrink-0">
                         <div className="flex items-center gap-3">
-                            {activeTripData && <GroupAvatar name={activeTripData.name} color={activeTripData.color} size="sm" />}
+                            {isSafarDM ? (
+                                /* State A: Safar DM */
+                                <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: "#6366f1" }}>
+                                    <Sparkles className="w-4 h-4 text-white" />
+                                </div>
+                            ) : (
+                                activeTripData && <GroupAvatar name={activeTripData.name} color={activeTripData.color} size="sm" />
+                            )}
                             <div>
-                                <h2 className="text-sm font-bold text-gray-800 dark:text-white">{activeTripData?.name ?? "Chat"}</h2>
-                                <p className="text-[11px] text-gray-400">{activeTripData?.members.join(", ")}</p>
+                                <h2 className="text-sm font-bold text-gray-800 dark:text-white">
+                                    {isSafarDM ? "Safar AI Assistant" : activeTripData?.name ?? "Chat"}
+                                </h2>
+                                <p className="text-[11px] text-gray-400">
+                                    {isSafarDM
+                                        ? "Always here to brainstorm."
+                                        : isShared
+                                            ? `Members: You${otherMembers.length > 0 ? ", " + otherMembers.join(", ") : ""}`
+                                            : "Only you"}
+                                </p>
                             </div>
                         </div>
                         <div className="flex items-center gap-1">
-                            <button onClick={() => setModal("addCollaborator")}
-                                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 transition-colors cursor-pointer" title="Add Collaborator">
-                                <UserPlus className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                            </button>
-                            <button onClick={() => setModal("groupSettings")}
-                                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 transition-colors cursor-pointer" title="Group Settings">
-                                <Settings className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                            </button>
+                            {!isSafarDM && (
+                                <>
+                                    {/* Add Collaborator — prominent when private, subtle when shared */}
+                                    <button onClick={() => setModal("addCollaborator")}
+                                        title="Add Collaborator"
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all ${!isShared
+                                            ? "bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/25"
+                                            : "hover:bg-gray-100 dark:hover:bg-white/5 text-gray-500 dark:text-gray-400"
+                                            }`}>
+                                        <UserPlus className="w-4 h-4" />
+                                        {!isShared && <span className="text-xs font-semibold hidden sm:inline">Invite</span>}
+                                    </button>
+                                    <button onClick={() => setModal("groupSettings")}
+                                        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 transition-colors cursor-pointer" title="Trip Settings">
+                                        <Settings className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </div>
 
@@ -756,31 +824,37 @@ export default function Dashboard() {
 
             {/* ╔══════════════════ MODALS ══════════════════╗ */}
 
-            {/* Create Group */}
-            <Modal open={modal === "createGroup"} onClose={() => setModal(null)}>
-                <h2 className="font-heading text-2xl text-gray-900 dark:text-white mb-1">New Group</h2>
-                <p className="text-sm text-gray-500 mb-5">Create a new trip group and invite collaborators.</p>
-                <div className="space-y-3">
-                    <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="Group Title (e.g. Goa 2026)"
-                        className="w-full h-11 px-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500/30" />
-                    <input value={newGroupDesc} onChange={e => setNewGroupDesc(e.target.value)} placeholder="Short description"
-                        className="w-full h-11 px-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500/30" />
-                    <div>
-                        <p className="text-xs text-gray-500 font-semibold mb-2 uppercase tracking-wider">Theme Color</p>
-                        <div className="flex gap-2 flex-wrap">
+            {/* Create Trip */}
+            <Modal open={modal === "createTrip"} onClose={() => setModal(null)}>
+                <h2 className="font-heading text-2xl text-gray-900 dark:text-white mb-1">New Trip</h2>
+                <p className="text-sm text-gray-500 mb-6">Start planning — private by default. Invite collaborators anytime.</p>
+                <div className="space-y-5">
+                    <input value={newTripName} onChange={e => setNewTripName(e.target.value)} placeholder="Trip Title (e.g. Goa 2026)"
+                        className="w-full h-12 px-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500/30" />
+                    <input value={newTripVibe} onChange={e => setNewTripVibe(e.target.value)} placeholder="Vibe (e.g. Beach & adventure)"
+                        className="w-full h-12 px-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500/30" />
+                    <div className="pt-1">
+                        <p className="text-xs text-gray-500 font-semibold mb-3 uppercase tracking-wider">Color</p>
+                        <div className="flex gap-3 flex-wrap">
                             {THEME_COLORS.map(c => (
-                                <button key={c} onClick={() => setNewGroupColor(c)}
-                                    className="w-8 h-8 rounded-full cursor-pointer transition-all hover:scale-110 ring-offset-2 dark:ring-offset-[#1A1A1A]"
-                                    style={{ backgroundColor: c, boxShadow: newGroupColor === c ? `0 0 0 3px ${c}` : "none" }} />
+                                <button key={c} onClick={() => setNewTripColor(c)}
+                                    className="w-9 h-9 rounded-full cursor-pointer transition-all hover:scale-110 ring-offset-2 dark:ring-offset-[#1A1A1A]"
+                                    style={{ backgroundColor: c, boxShadow: newTripColor === c ? `0 0 0 3px ${c}` : "none" }} />
                             ))}
                         </div>
                     </div>
-                    <button onClick={handleCreateGroup}
-                        className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm mt-2 cursor-pointer transition-all hover:scale-[1.02] shadow-lg shadow-blue-500/25">
-                        Create Group
-                    </button>
+                    <div className="pt-1 space-y-3">
+                        <button onClick={handleCreateTrip}
+                            className="w-full h-12 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm cursor-pointer transition-all hover:scale-[1.02] shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">
+                            <Lock className="w-4 h-4" /> Create Private Trip
+                        </button>
+                        <p className="text-center text-xs text-gray-400 dark:text-gray-500 leading-relaxed px-2">
+                            Note: Your trip starts as a private space. You can always add members later by inviting them as collaborators from the trip header.
+                        </p>
+                    </div>
                 </div>
             </Modal>
+
 
             {/* My Travel Profile */}
             <Modal open={modal === "profile"} onClose={() => setModal(null)}>
@@ -831,14 +905,27 @@ export default function Dashboard() {
 
             {/* Add Collaborator */}
             <Modal open={modal === "addCollaborator"} onClose={() => setModal(null)}>
-                <h2 className="font-heading text-2xl text-gray-900 dark:text-white mb-1">Add Collaborator</h2>
-                <p className="text-sm text-gray-500 mb-5">Invite someone by their SyncRoute username.</p>
+                <div className="flex items-center gap-3 mb-1">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center">
+                        <UserPlus className="w-5 h-5 text-blue-500" />
+                    </div>
+                    <div>
+                        <h2 className="font-heading text-2xl text-gray-900 dark:text-white">Invite Someone</h2>
+                        <p className="text-xs text-gray-400">This trip is currently private</p>
+                    </div>
+                </div>
+                <p className="text-sm text-gray-500 mb-5 mt-2">Enter their SyncRoute username to upgrade this trip to a shared space.</p>
                 <div className="space-y-3">
                     <div className="relative">
                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">@</span>
-                        <input placeholder="username" className="w-full h-11 pl-8 pr-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500/30" />
+                        <input
+                            value={collaboratorName}
+                            onChange={e => setCollaboratorName(e.target.value)}
+                            onKeyDown={e => e.key === "Enter" && handleAddCollaborator()}
+                            placeholder="username"
+                            className="w-full h-11 pl-8 pr-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500/30" />
                     </div>
-                    <button onClick={() => setModal(null)}
+                    <button onClick={handleAddCollaborator}
                         className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm cursor-pointer transition-all hover:scale-[1.02] shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">
                         <UserPlus className="w-4 h-4" /> Send Invite
                     </button>

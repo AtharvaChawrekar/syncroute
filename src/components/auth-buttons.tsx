@@ -78,7 +78,7 @@ function AuthModal({ open, initialView, onClose }: {
                                     <input className={inputBase} placeholder="you@example.com" />
                                 </div>
                                 <div>
-                                    <div className="flex items-center justify-between mb-1.5">
+                                    <div className="flex items-center justify-between">
                                         <Label>Password</Label>
                                         <button onClick={() => navigate("forgot", 1)}
                                             className="text-xs text-blue-500 hover:text-blue-400 font-semibold cursor-pointer transition-colors">

@@ -273,19 +273,19 @@ function Slide3({ state, set }: { state: OnboardingState; set: (p: Partial<Onboa
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {TRAVEL_STYLE.map(s => (
                     <button key={s.id} onClick={() => set({ travelStyle: s.id })}
-                        className={`flex items-center gap-4 p-4 rounded-2xl border transition-all cursor-pointer text-left group ${state.travelStyle === s.id
+                        className={`relative flex items-center gap-4 p-4 rounded-2xl border transition-all cursor-pointer text-left group ${state.travelStyle === s.id
                             ? "bg-blue-600/25 border-blue-500 shadow-lg shadow-blue-500/20"
                             : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/25"}`}>
                         <div className={`shrink-0 w-12 h-12 rounded-xl flex items-center justify-center ${state.travelStyle === s.id ? "bg-blue-500/20" : "bg-white/5"
                             }`}>
                             <span className={s.color}>{s.icon}</span>
                         </div>
-                        <div>
+                        <div className="min-w-0 flex-1">
                             <p className={`font-bold text-sm ${state.travelStyle === s.id ? "text-blue-300" : "text-white"}`}>{s.label}</p>
                             <p className="text-xs text-white/40 mt-0.5">{s.desc}</p>
                         </div>
                         {state.travelStyle === s.id && (
-                            <div className="ml-auto w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center shrink-0">
+                            <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
                                 <Check className="w-3 h-3 text-white" />
                             </div>
                         )}
