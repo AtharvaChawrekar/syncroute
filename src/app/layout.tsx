@@ -15,7 +15,7 @@ const bebasNeue = Bebas_Neue({
   subsets: ["latin"],
 });
 export const metadata: Metadata = {
-  title: "SyncRoute | Memorable Travels",
+  title: "SyncRoute",
   description: "Plan your unforgettable adventures with SyncRoute.",
 };
 
