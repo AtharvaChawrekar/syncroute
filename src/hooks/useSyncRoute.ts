@@ -545,9 +545,9 @@ export function useInvitations(userId: string | null) {
         return () => { supabase.removeChannel(channel); };
     }, [userId, fetchInvitations]);
 
-    // Send invite by username
+    // Send invite by username (case-insensitive)
     const sendInvite = useCallback(async (tripId: string, inviterId: string, username: string): Promise<"ok" | "not_found" | "already" | "error"> => {
-        const { data: targetUser } = await supabase.from("users").select("id").eq("username", username).maybeSingle();
+        const { data: targetUser } = await supabase.from("users").select("id").ilike("username", username).limit(1).maybeSingle();
         if (!targetUser) return "not_found";
         const { error } = await supabase.from("invitations").insert({
             trip_id: tripId,

@@ -195,10 +195,10 @@ function SwipeableMessage({ msg, onReply }: { msg: Message; onReply: (msg: Messa
                         <span className="text-[10px] text-gray-400">{msg.time}</span>
                     </div>
                     <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${msg.isAI
-                            ? "bg-gradient-to-br from-blue-500/10 to-purple-500/10 dark:from-blue-500/15 dark:to-purple-500/15 border border-blue-200 dark:border-blue-500/20 text-gray-800 dark:text-gray-200"
-                            : msg.isYou
-                                ? "bg-blue-600 text-white rounded-br-sm"
-                                : "bg-white dark:bg-[#1A1A1A] border border-gray-200 dark:border-white/5 text-gray-800 dark:text-gray-200 rounded-bl-sm"
+                        ? "bg-gradient-to-br from-blue-500/10 to-purple-500/10 dark:from-blue-500/15 dark:to-purple-500/15 border border-blue-200 dark:border-blue-500/20 text-gray-800 dark:text-gray-200"
+                        : msg.isYou
+                            ? "bg-blue-600 text-white rounded-br-sm"
+                            : "bg-white dark:bg-[#1A1A1A] border border-gray-200 dark:border-white/5 text-gray-800 dark:text-gray-200 rounded-bl-sm"
                         }`}>
                         {msg.isStreaming && !msg.text ? (
                             /* Typing dots when no text yet */
@@ -285,8 +285,9 @@ export default function Dashboard() {
     const [itinerary, setItinerary] = useState<ItineraryDay[]>(INITIAL_ITINERARY);
     const [activeDisruption, setActiveDisruption] = useState<string | null>(null);
 
-    // @mention autocomplete
+    // @mention autocompl    // Mentions
     const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+    const [mentionIndex, setMentionIndex] = useState(0);
 
     const MENTION_SUGGESTIONS = [
         { tag: "@Safar", keyword: "Safar", desc: "Your AI trip planner" },
@@ -335,8 +336,9 @@ export default function Dashboard() {
         const val = e.target.value;
         setMessageInput(val);
         // Detect '@' trigger: find last '@' and extract query after it
+        const isWorkspace = trips.find(t => t.id === activeTrip)?.is_workspace ?? false;
         const atIdx = val.lastIndexOf("@");
-        if (atIdx !== -1 && (atIdx === 0 || val[atIdx - 1] === " ")) {
+        if (!isWorkspace && atIdx !== -1 && (atIdx === 0 || val[atIdx - 1] === " ")) {
             const query = val.slice(atIdx + 1);
             // Only show if no space after @
             if (!query.includes(" ")) {
@@ -712,8 +714,9 @@ export default function Dashboard() {
                                                 <button
                                                     key={s.tag}
                                                     onClick={() => insertMention(s.tag)}
-                                                    className={`w-full flex items-center justify-between gap-4 px-4 py-2.5 cursor-pointer transition-colors hover:bg-blue-50 dark:hover:bg-blue-500/10 ${i < filteredMentions.length - 1 ? "border-b border-gray-100 dark:border-white/5" : ""
-                                                        }`}
+                                                    className={`w-full flex items-center justify-between gap-4 px-4 py-2.5 cursor-pointer transition-colors ${i === mentionIndex ? "bg-blue-50 dark:bg-blue-500/10" : "hover:bg-blue-50 dark:hover:bg-blue-500/10"
+                                                        } ${i < filteredMentions.length - 1 ? "border-b border-gray-100 dark:border-white/5" : ""}`}
+                                                    onMouseEnter={() => setMentionIndex(i)}
                                                 >
                                                     <span className="font-semibold text-sm text-blue-600 dark:text-blue-400">{s.tag}</span>
                                                     <span className="text-xs text-gray-400 dark:text-gray-500 truncate">{s.desc}</span>
@@ -727,7 +730,12 @@ export default function Dashboard() {
                                     value={messageInput}
                                     onChange={handleInputChange}
                                     onKeyDown={e => {
-                                        if (e.key === "Escape") { setMentionQuery(null); return; }
+                                        if (mentionQuery !== null && filteredMentions.length > 0) {
+                                            if (e.key === "Escape") { setMentionQuery(null); e.preventDefault(); return; }
+                                            if (e.key === "ArrowDown") { setMentionIndex(prev => (prev + 1) % filteredMentions.length); e.preventDefault(); return; }
+                                            if (e.key === "ArrowUp") { setMentionIndex(prev => (prev - 1 + filteredMentions.length) % filteredMentions.length); e.preventDefault(); return; }
+                                            if (e.key === "Enter") { insertMention(filteredMentions[mentionIndex].tag); e.preventDefault(); return; }
+                                        }
                                         if (e.key === "Enter" && mentionQuery === null) handleSend();
                                     }}
                                     placeholder='Type a message or say "@Safar plan my day…"'
@@ -937,8 +945,8 @@ export default function Dashboard() {
                         <div className="flex gap-3 flex-wrap">
                             {THEME_COLORS.map(c => (
                                 <button key={c} onClick={() => setNewTripColor(c)}
-                                    className="w-9 h-9 rounded-full cursor-pointer transition-all hover:scale-110 ring-offset-2 dark:ring-offset-[#1A1A1A]"
-                                    style={{ backgroundColor: c, boxShadow: newTripColor === c ? `0 0 0 3px ${c}` : "none" }} />
+                                    className={`w-9 h-9 rounded-full cursor-pointer transition-all hover:scale-110 ${newTripColor === c ? "ring-2 ring-offset-2 dark:ring-offset-[#1A1A1A]" : ""}`}
+                                    style={{ backgroundColor: c, '--tw-ring-color': c } as React.CSSProperties} />
                             ))}
                         </div>
                     </div>
