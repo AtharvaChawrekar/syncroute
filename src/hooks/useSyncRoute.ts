@@ -1,37 +1,32 @@
 /**
- * SyncRoute – Supabase Hook Stubs
+ * SyncRoute – Real Supabase Hooks
  *
- * These are mock hooks that mirror the Supabase relational schema:
- *   messages  (id, trip_id, user_id, text, created_at, reply_to_id)
- *   profiles  (id, username, email, avatar_color, budget_pref, pace_pref, interests)
- *   trips     (id, name, description, color, created_by)
- *   trip_members (trip_id, user_id, role)
- *
- * To wire real Supabase data:
- *   1. npm install @supabase/supabase-js
- *   2. Create lib/supabase.ts with createClient(SUPABASE_URL, ANON_KEY)
- *   3. Replace the mock return values below with real queries, e.g.:
- *        const { data } = await supabase.from('messages').select('*').eq('trip_id', tripId)
- *   4. For Realtime, subscribe inside useEffect:
- *        supabase.channel('messages').on('postgres_changes', ...).subscribe()
+ * Tables used:
+ *   public.users       – id, username, email, preferences (jsonb)
+ *   public.trips       – id, title, vibe, theme_color, created_by, is_workspace, created_at
+ *   public.trip_members – trip_id, user_id, joined_at
+ *   public.invitations  – id, trip_id, inviter_id, invitee_id, status, created_at
+ *   public.messages     – id, trip_id, sender_id, content, is_ai, created_at
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { supabase } from "@/lib/supabase";
+import type { User } from "@supabase/supabase-js";
 
-// ─── TYPES (mirror Supabase table columns) ──────────────────────────────────
+// ─── TYPES ─────────────────────────────────────────────────────────────────────
 
 export interface Profile {
     id: string;
     username: string;
     email: string;
     avatar_color: string;
-    budget_pref: number;    // 0–100
-    pace_pref: number;      // 0–100
+    budget_pref: number;
+    pace_pref: number;
     interests: string[];
 }
 
 export interface Message {
-    id: number;
+    id: string;
     trip_id: string;
     user_id: string;
     username: string;
@@ -41,6 +36,7 @@ export interface Message {
     time: string;
     isAI: boolean;
     isYou?: boolean;
+    isStreaming?: boolean;   // true while Groq tokens are being received
     reply_to?: { username: string; text: string } | null;
 }
 
@@ -53,115 +49,530 @@ export interface Trip {
     unread: number;
     active: boolean;
     members: string[];
+    is_workspace: boolean;
 }
 
-// ─── MOCK HOOK: useChatMessages ──────────────────────────────────────────────
-// Replace mock data with: supabase.from('messages').select('*').eq('trip_id', tripId)
-// Subscribe to realtime: supabase.channel(`messages:${tripId}`).on('postgres_changes', ...)
-
-export const MOCK_MESSAGES: Message[] = [
-    { id: 1, trip_id: "trip_1", user_id: "u1", username: "Rahul", avatar: "R", avatar_color: "#f97316", text: "Hey everyone! Let's finalize Goa plans 🏖️", time: "10:30 AM", isAI: false },
-    { id: 2, trip_id: "trip_1", user_id: "u2", username: "Priya", avatar: "P", avatar_color: "#a855f7", text: "I'm in! But can we keep budget under ₹15K per person?", time: "10:32 AM", isAI: false },
-    { id: 3, trip_id: "trip_1", user_id: "me", username: "You", avatar: "Y", avatar_color: "#3b82f6", text: "@Safar generate an itinerary for us — make it relaxing for Mom but adventurous for Rahul.", time: "10:35 AM", isAI: false, isYou: true },
-    { id: 4, trip_id: "trip_1", user_id: "ai", username: "Safar AI", avatar: "✦", avatar_color: "#6366f1", text: "Got it! I've analyzed everyone's profiles. Here's a balanced 4-day Goa itinerary. Water sports in the morning for Rahul's peak energy, calm beach experiences for the afternoons. Budget optimized to ₹12,800/person. Check the itinerary panel →", time: "10:36 AM", isAI: true },
-    { id: 5, trip_id: "trip_1", user_id: "u1", username: "Rahul", avatar: "R", avatar_color: "#f97316", text: "This looks amazing! Can we swap the museum visit for jet skiing?", time: "10:40 AM", isAI: false },
-    { id: 6, trip_id: "trip_1", user_id: "ai", username: "Safar AI", avatar: "✦", avatar_color: "#6366f1", text: "Done! Swapped Goa State Museum with Jet Skiing at Baga Beach. +₹800/person to budget. Group consensus still within range. Updated itinerary is live →", time: "10:41 AM", isAI: true },
-];
-
-export function useChatMessages(_tripId: string) {
-    const [messages, setMessages] = useState<Message[]>(MOCK_MESSAGES);
-    const [loading, setLoading] = useState(false);
-
-    // TODO: Replace with Supabase Realtime subscription
-    // useEffect(() => {
-    //   const channel = supabase.channel(`messages:${_tripId}`)
-    //     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
-    //       (payload) => setMessages(prev => [...prev, payload.new as Message]))
-    //     .subscribe();
-    //   return () => { supabase.removeChannel(channel); };
-    // }, [_tripId]);
-
-    const sendMessage = (text: string, replyTo?: { username: string; text: string } | null) => {
-        // TODO: await supabase.from('messages').insert({ trip_id: _tripId, text, reply_to_id: replyTo?.id })
-        const newMsg: Message = {
-            id: messages.length + 1,
-            trip_id: _tripId,
-            user_id: "me",
-            username: "You",
-            avatar: "Y",
-            avatar_color: "#3b82f6",
-            text,
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            isAI: false,
-            isYou: true,
-            reply_to: replyTo || null,
-        };
-        setMessages(prev => [...prev, newMsg]);
-    };
-
-    return { messages, loading, sendMessage };
+export interface Invitation {
+    id: string;
+    fromUsername: string;
+    tripName: string;
+    tripColor: string;
+    trip_id: string;
 }
 
-// ─── MOCK HOOK: useTrips ─────────────────────────────────────────────────────
-// Replace with: supabase.from('trips').select('*, trip_members(*)').eq('trip_members.user_id', userId)
+// ─── COLOUR HELPERS ────────────────────────────────────────────────────────────
 
-export const MOCK_TRIPS: Trip[] = [
-    // ── Permanent Safar AI workspace DM (always first, never deletable)
-    { id: "safarDM", name: "Safar AI", description: "Your private AI scratchpad", color: "#6366f1", lastMsg: "Ask me anything about your trip…", unread: 0, active: false, members: ["You"] },
-    { id: "trip_1", name: "Goa Trip with College Bros", description: "Beach vibes and adventure!", color: "#3b82f6", lastMsg: "@Safar find us a beach shack!", unread: 3, active: true, members: ["Rahul", "Priya", "You", "Aakash"] },
-    { id: "trip_2", name: "Family Europe Tour", description: "Relaxed cultural exploration", color: "#a855f7", lastMsg: "Mom wants to visit the Louvre", unread: 0, active: false, members: ["Mom", "Dad", "You"] },
-    { id: "trip_3", name: "Solo Japan Adventure", description: "Finding inner peace in Kyoto", color: "#10b981", lastMsg: "Exploring temples tomorrow", unread: 1, active: false, members: ["You"] },
-    { id: "trip_4", name: "Couples Bali Getaway", description: "Romantic sunsets and rice fields", color: "#f59e0b", lastMsg: "Sunset dinner at Uluwatu?", unread: 0, active: false, members: ["You", "Ananya"] },
-];
+const AVATAR_COLOURS = ["#3b82f6", "#a855f7", "#10b981", "#f59e0b", "#ef4444", "#ec4899", "#06b6d4", "#f97316"];
+function colourFor(str: string) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + h * 31;
+    return AVATAR_COLOURS[Math.abs(h) % AVATAR_COLOURS.length];
+}
 
-export function useTrips() {
-    const [trips, setTrips] = useState<Trip[]>(MOCK_TRIPS);
+function fmtTime(iso: string) {
+    return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
-    const addTrip = (name: string, description: string, color: string) => {
-        // TODO: await supabase.from('trips').insert({ name, description, color, created_by: userId })
-        const newTrip: Trip = { id: `trip_${Date.now()}`, name, description, color, lastMsg: "Just created!", unread: 0, active: false, members: ["You"] };
-        setTrips(prev => [...prev, newTrip]);
-    };
+// ─── HOOK: useCurrentUser ──────────────────────────────────────────────────────
 
-    const deleteTrip = (id: string) => {
-        // TODO: await supabase.from('trips').delete().eq('id', id)
-        // Safar DM is permanent — never delete it
-        setTrips(prev => prev.filter(t => t.id !== id && t.id !== "safarDM"));
-    };
+export function useCurrentUser() {
+    const [supaUser, setSupaUser] = useState<User | null>(null);
+    const [profile, setProfile] = useState<Profile | null>(null);
+    const [loading, setLoading] = useState(true);
 
-    const addCollaborator = (tripId: string, memberName: string) => {
-        // TODO: await supabase.from('trip_members').insert({ trip_id: tripId, user_id: ... })
+    const loadProfile = useCallback(async (uid: string) => {
+        const { data } = await supabase.from("users").select("*").eq("id", uid).single();
+        if (data) {
+            const prefs = (data.preferences as Record<string, unknown>) ?? {};
+            setProfile({
+                id: data.id,
+                username: data.username ?? "You",
+                email: data.email ?? "",
+                avatar_color: (prefs.avatar_color as string) ?? colourFor(data.username ?? uid),
+                budget_pref: (prefs.budget as number) ?? 65,
+                pace_pref: (prefs.pace as number) ?? 70,
+                interests: (prefs.interests as string[]) ?? [],
+            });
+        }
+        setLoading(false);
+    }, []);
+
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            const u = session?.user ?? null;
+            setSupaUser(u);
+            if (u) loadProfile(u.id);
+            else setLoading(false);
+        });
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_ev, session) => {
+            const u = session?.user ?? null;
+            setSupaUser(u);
+            if (u) loadProfile(u.id);
+            else { setProfile(null); setLoading(false); }
+        });
+
+        return () => subscription.unsubscribe();
+    }, [loadProfile]);
+
+    const updateProfile = useCallback(async (updates: Partial<Profile>) => {
+        if (!supaUser) return;
+        setProfile(prev => prev ? { ...prev, ...updates } : prev);
+        // merge into preferences jsonb
+        const prefPatch: Record<string, unknown> = {};
+        if (updates.budget_pref !== undefined) prefPatch.budget = updates.budget_pref;
+        if (updates.pace_pref !== undefined) prefPatch.pace = updates.pace_pref;
+        if (updates.interests !== undefined) prefPatch.interests = updates.interests;
+        if (Object.keys(prefPatch).length) {
+            const { data: existing } = await supabase.from("users").select("preferences").eq("id", supaUser.id).single();
+            await supabase.from("users").update({
+                preferences: { ...((existing?.preferences as object) ?? {}), ...prefPatch },
+            }).eq("id", supaUser.id);
+        }
+    }, [supaUser]);
+
+    return { user: supaUser, profile, loading, updateProfile };
+}
+
+// ─── HOOK: useTrips ────────────────────────────────────────────────────────────
+
+export function useTrips(userId: string | null) {
+    const [trips, setTrips] = useState<Trip[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    const fetchTrips = useCallback(async () => {
+        if (!userId) { setLoading(false); return; }
+        setLoading(true);
+
+        try {
+            // Step 1: get trip IDs this user belongs to
+            const { data: memberRows, error: memberErr } = await supabase
+                .from("trip_members")
+                .select("trip_id")
+                .eq("user_id", userId);
+
+            if (memberErr) { console.error("fetchTrips:members", memberErr); setLoading(false); return; }
+            const tripIds = (memberRows ?? []).map(r => r.trip_id);
+
+            if (tripIds.length === 0) { setTrips([]); setLoading(false); return; }
+
+            // Step 2a: trip details
+            const { data: tripRows, error: tripErr } = await supabase
+                .from("trips")
+                .select("id, title, vibe, theme_color, is_workspace, created_at")
+                .in("id", tripIds);
+            if (tripErr) { console.error("fetchTrips:trips", tripErr); setLoading(false); return; }
+
+            // Step 2b: all members for these trips (username via join)
+            const { data: allMemberRows, error: memberDetailErr } = await supabase
+                .from("trip_members")
+                .select("trip_id, users!inner(username)")
+                .in("trip_id", tripIds);
+            if (memberDetailErr) console.warn("fetchTrips:memberDetail", memberDetailErr);
+
+            const membersByTrip: Record<string, string[]> = {};
+            for (const row of allMemberRows ?? []) {
+                const uname = (row.users as unknown as { username: string })?.username ?? "?";
+                if (!membersByTrip[row.trip_id]) membersByTrip[row.trip_id] = [];
+                membersByTrip[row.trip_id].push(uname);
+            }
+
+            const mapped: Trip[] = (tripRows ?? []).map(t => ({
+                id: t.id,
+                name: t.title,
+                description: t.vibe ?? "",
+                color: t.theme_color,
+                lastMsg: "",
+                unread: 0,
+                active: false,
+                members: membersByTrip[t.id] ?? [],
+                is_workspace: t.is_workspace,
+            }));
+            mapped.sort((a, b) => (a.is_workspace ? -1 : b.is_workspace ? 1 : 0));
+            setTrips(mapped);
+        } catch (e) {
+            console.error("fetchTrips:unexpected", e);
+        } finally {
+            setLoading(false);
+        }
+    }, [userId]);
+
+    // Ensure a safarDM trip exists for this user
+    const ensureSafarDM = useCallback(async (): Promise<string | null> => {
+        if (!userId) return null;
+        // Already in trips list?
+        const existing = trips.find(t => t.is_workspace);
+        if (existing) return existing.id;
+        // Query DB directly
+        const { data: memberRow } = await supabase
+            .from("trip_members")
+            .select("trip_id, trips!inner(id, is_workspace)")
+            .eq("user_id", userId)
+            .filter("trips.is_workspace", "eq", true)
+            .maybeSingle();
+        if (memberRow) return (memberRow as { trip_id: string }).trip_id;
+        // Create one
+        const { data: newTrip } = await supabase.from("trips").insert({
+            title: "Safar AI",
+            vibe: "Your private AI travel assistant",
+            theme_color: "#6366f1",
+            created_by: userId,
+            is_workspace: true,
+        }).select("id").single();
+        if (newTrip) {
+            await supabase.from("trip_members").insert({ trip_id: newTrip.id, user_id: userId });
+            return newTrip.id;
+        }
+        return null;
+    }, [userId, trips]);
+
+    useEffect(() => {
+        if (userId) fetchTrips();
+    }, [userId, fetchTrips]);
+
+    const addTrip = useCallback(async (name: string, description: string, color: string): Promise<string | null> => {
+        if (!userId) return null;
+        const { data } = await supabase.from("trips").insert({
+            title: name,
+            vibe: description,
+            theme_color: color,
+            created_by: userId,
+            is_workspace: false,
+        }).select("id").single();
+        if (data) {
+            await supabase.from("trip_members").insert({ trip_id: data.id, user_id: userId });
+            await fetchTrips();
+            return data.id;
+        }
+        return null;
+    }, [userId, fetchTrips]);
+
+    const deleteTrip = useCallback(async (id: string) => {
+        await supabase.from("trips").delete().eq("id", id);
+        setTrips(prev => prev.filter(t => t.id !== id));
+    }, []);
+
+    // Local-only collaborator add (for optimistic UI; real invite goes through invitations table)
+    const addCollaborator = useCallback((tripId: string, memberName: string) => {
         if (!memberName.trim()) return;
         setTrips(prev => prev.map(t =>
             t.id === tripId && !t.members.includes(memberName)
-                ? { ...t, members: [...t.members, memberName] }
-                : t
+                ? { ...t, members: [...t.members, memberName] } : t
         ));
-    };
+    }, []);
 
-    return { trips, addTrip, deleteTrip, addCollaborator };
+    return { trips, loading, addTrip, deleteTrip, addCollaborator, ensureSafarDM, refetchTrips: fetchTrips };
 }
 
-// ─── MOCK HOOK: useProfile ───────────────────────────────────────────────────
-// Replace with: supabase.from('profiles').select('*').eq('id', userId).single()
-
-export const MOCK_PROFILE: Profile = {
-    id: "me",
-    username: "Yogesh",
-    email: "user@syncroute.demo",
-    avatar_color: "#3b82f6",
-    budget_pref: 65,
-    pace_pref: 70,
-    interests: ["Adventure", "Food", "Photography", "Beach", "Culture"],
-};
-
+// Re-export for dashboard compat
 export function useProfile() {
-    const [profile, setProfile] = useState<Profile>(MOCK_PROFILE);
+    const { profile, updateProfile, loading } = useCurrentUser();
+    return { profile: profile ?? { id: "", username: "You", email: "", avatar_color: "#3b82f6", budget_pref: 65, pace_pref: 70, interests: [] }, updateProfile, loading };
+}
 
-    const updateProfile = (updates: Partial<Profile>) => {
-        // TODO: await supabase.from('profiles').update(updates).eq('id', profile.id)
-        setProfile(prev => ({ ...prev, ...updates }));
-    };
+// ─── HOOK: useChatMessages ────────────────────────────────────────────────────
 
-    return { profile, updateProfile };
+export function useChatMessages(tripId: string | null, currentUser: Profile | null, isWorkspace?: boolean) {
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [aiLoading, setAiLoading] = useState(false);
+    const messagesRef = useRef<Message[]>([]);
+    messagesRef.current = messages;
+
+    const toClientMsg = useCallback((m: {
+        id: string; trip_id: string; sender_id: string | null; is_ai: boolean;
+        content: string; created_at: string; users?: { username: string } | null;
+    }, selfId?: string): Message => ({
+        id: m.id,
+        trip_id: m.trip_id,
+        user_id: m.sender_id ?? "ai",
+        username: m.is_ai ? "Safar AI" : (m.users?.username ?? "Unknown"),
+        avatar: m.is_ai ? "✦" : (m.users?.username?.charAt(0).toUpperCase() ?? "?"),
+        avatar_color: m.is_ai ? "#6366f1" : colourFor(m.users?.username ?? m.sender_id ?? "x"),
+        text: m.content,
+        time: fmtTime(m.created_at),
+        isAI: m.is_ai,
+        isYou: m.sender_id === selfId,
+    }), []);
+
+    useEffect(() => {
+        if (!tripId) { setMessages([]); return; }
+        setLoading(true);
+        setMessages([]);
+
+        // Fetch historical messages
+        (async () => {
+            const { data } = await supabase
+                .from("messages")
+                .select("*, users(username)")
+                .eq("trip_id", tripId)
+                .order("created_at", { ascending: true });
+            if (data) setMessages(data.map(m => toClientMsg(m, currentUser?.id)));
+            setLoading(false);
+        })();
+
+        // Realtime subscription
+        const channel = supabase
+            .channel(`messages:${tripId}`)
+            .on("postgres_changes", {
+                event: "INSERT",
+                schema: "public",
+                table: "messages",
+                filter: `trip_id=eq.${tripId}`,
+            }, async (payload) => {
+                const m = payload.new as { id: string; trip_id: string; sender_id: string | null; is_ai: boolean; content: string; created_at: string };
+                // Avoid duplicate (we optimistically added yours already)
+                if (messagesRef.current.some(ex => ex.id === m.id)) return;
+                // Fetch sender username
+                let username = "Unknown";
+                if (m.sender_id) {
+                    const { data: u } = await supabase.from("users").select("username").eq("id", m.sender_id).single();
+                    if (u) username = u.username;
+                }
+                setMessages(prev => [...prev, toClientMsg({ ...m, users: { username } }, currentUser?.id)]);
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tripId]);
+
+    // @Safar AI helper — streams tokens from /api/safar (SSE)
+    const callSafar = useCallback(async (userText: string) => {
+        if (!tripId) return;
+        setAiLoading(true);
+
+        // Create a placeholder bubble immediately
+        const streamId = `stream-${Date.now()}`;
+        const nowIso = new Date().toISOString();
+        const streamingMsg: Message = {
+            id: streamId,
+            trip_id: tripId,
+            user_id: "ai",
+            username: "Safar AI",
+            avatar: "✦",
+            avatar_color: "#6366f1",
+            text: "",
+            time: fmtTime(nowIso),
+            isAI: true,
+            isYou: false,
+            isStreaming: true,
+        };
+        setMessages(prev => [...prev, streamingMsg]);
+
+        try {
+            // Build context from last 12 messages (skip any streaming placeholders)
+            const recent = messagesRef.current
+                .filter(m => !m.isStreaming && m.text.trim())
+                .slice(-12)
+                .map(m => ({
+                    role: (m.isAI ? "assistant" : "user") as "assistant" | "user",
+                    content: m.text,
+                }));
+            recent.push({ role: "user", content: userText });
+
+            const res = await fetch("/api/safar", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ messages: recent }),
+            });
+
+            if (!res.body) throw new Error("No response body");
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let fullReply = "";
+            let buffer = "";
+
+            // Read SSE stream token by token
+            outer: while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                // Process complete lines from buffer
+                const lines = buffer.split("\n");
+                buffer = lines.pop() ?? ""; // keep incomplete last line
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed.startsWith("data:")) continue;
+                    const payload = trimmed.slice(5).trim();
+                    if (payload === "[DONE]") break outer;
+                    try {
+                        const parsed = JSON.parse(payload);
+                        const token: string = parsed.choices?.[0]?.delta?.content ?? "";
+                        if (token) {
+                            fullReply += token;
+                            setMessages(prev => prev.map(m =>
+                                m.id === streamId ? { ...m, text: fullReply } : m
+                            ));
+                        }
+                        // Groq signals finish_reason=stop inline
+                        if (parsed.choices?.[0]?.finish_reason === "stop") break outer;
+                    } catch { /* skip malformed chunks */ }
+                }
+            }
+
+            const finalText = fullReply.trim() || "...";
+
+            // Persist to DB
+            const { data: aiMsg } = await supabase.from("messages").insert({
+                trip_id: tripId,
+                sender_id: null,
+                content: finalText,
+                is_ai: true,
+            }).select("id, created_at").single();
+
+            // Replace streaming placeholder with real record
+            setMessages(prev => prev.map(m =>
+                m.id === streamId
+                    ? { ...m, id: aiMsg?.id ?? streamId, text: finalText, time: fmtTime(aiMsg?.created_at ?? nowIso), isStreaming: false }
+                    : m
+            ));
+        } catch (e) {
+            console.error("@Safar stream error:", e);
+            setMessages(prev => prev.map(m =>
+                m.id === streamId
+                    ? { ...m, text: "Sorry, Safar hit a snag. Try again! ✈️", isStreaming: false }
+                    : m
+            ));
+        } finally {
+            setAiLoading(false);
+        }
+    }, [tripId, currentUser?.id]);
+
+    const sendMessage = useCallback(async (
+        text: string,
+        replyTo?: { username: string; text: string } | null
+    ) => {
+        if (!tripId || !currentUser || !text.trim()) return;
+
+        // Optimistic local insert
+        const tempId = `temp-${Date.now()}`;
+        const optimistic: Message = {
+            id: tempId,
+            trip_id: tripId,
+            user_id: currentUser.id,
+            username: currentUser.username,
+            avatar: currentUser.username.charAt(0).toUpperCase(),
+            avatar_color: currentUser.avatar_color,
+            text,
+            time: fmtTime(new Date().toISOString()),
+            isAI: false,
+            isYou: true,
+            reply_to: replyTo ?? null,
+        };
+        setMessages(prev => [...prev, optimistic]);
+
+        // Persist to DB (replace temp after realtime echoes, or keep as-is)
+        const { data: saved } = await supabase.from("messages").insert({
+            trip_id: tripId,
+            sender_id: currentUser.id,
+            content: text,
+            is_ai: false,
+        }).select("id, created_at").single();
+
+        // Replace temp id with real id
+        if (saved) {
+            setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: saved.id, time: fmtTime(saved.created_at) } : m));
+        }
+
+        // AI trigger: @Safar keyword OR workspace (every msg goes to AI)
+        const shouldCallAI = isWorkspace || /\@Safar\b/i.test(text);
+        if (shouldCallAI) await callSafar(text);
+    }, [tripId, currentUser, isWorkspace, callSafar]);
+
+    return { messages, loading, aiLoading, sendMessage };
+}
+
+// ─── HOOK: useInvitations ─────────────────────────────────────────────────────
+
+export function useInvitations(userId: string | null) {
+    const [invitations, setInvitations] = useState<Invitation[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    const fetchInvitations = useCallback(async () => {
+        if (!userId) return;
+        setLoading(true);
+        const { data } = await supabase
+            .from("invitations")
+            .select(`
+                id, trip_id, status, created_at,
+                trips ( title, theme_color ),
+                inviter:users!invitations_inviter_id_fkey ( username )
+            `)
+            .eq("invitee_id", userId)
+            .eq("status", "pending");
+
+        if (data) {
+            setInvitations(data.map(inv => {
+                type InvJoin = {
+                    id: string; trip_id: string; status: string; created_at: string;
+                    trips: { title: string; theme_color: string }[] | null;
+                    inviter: { username: string }[] | null;
+                };
+                const row = (inv as unknown) as InvJoin;
+                const trip = Array.isArray(row.trips) ? row.trips[0] : row.trips;
+                const inviter = Array.isArray(row.inviter) ? row.inviter[0] : row.inviter;
+                return {
+                    id: row.id,
+                    fromUsername: inviter?.username ?? "Someone",
+                    tripName: trip?.title ?? "A trip",
+                    tripColor: trip?.theme_color ?? "#3b82f6",
+                    trip_id: row.trip_id,
+                };
+            }));
+        }
+        setLoading(false);
+    }, [userId]);
+
+    useEffect(() => {
+        fetchInvitations();
+
+        if (!userId) return;
+        // Realtime: new invitation for me
+        const channel = supabase
+            .channel(`invitations:${userId}`)
+            .on("postgres_changes", {
+                event: "INSERT",
+                schema: "public",
+                table: "invitations",
+                filter: `invitee_id=eq.${userId}`,
+            }, () => { fetchInvitations(); })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, [userId, fetchInvitations]);
+
+    // Send invite by username
+    const sendInvite = useCallback(async (tripId: string, inviterId: string, username: string): Promise<"ok" | "not_found" | "already" | "error"> => {
+        const { data: targetUser } = await supabase.from("users").select("id").eq("username", username).maybeSingle();
+        if (!targetUser) return "not_found";
+        const { error } = await supabase.from("invitations").insert({
+            trip_id: tripId,
+            inviter_id: inviterId,
+            invitee_id: targetUser.id,
+            status: "pending",
+        });
+        if (error) {
+            if (error.code === "23505") return "already"; // unique constraint
+            return "error";
+        }
+        return "ok";
+    }, []);
+
+    const acceptInvitation = useCallback(async (invId: string, tripId: string, inviteeId: string, refetchTrips: () => void) => {
+        await supabase.from("invitations").update({ status: "accepted" }).eq("id", invId);
+        await supabase.from("trip_members").upsert({ trip_id: tripId, user_id: inviteeId }, { onConflict: "trip_id,user_id" });
+        setInvitations(prev => prev.filter(i => i.id !== invId));
+        refetchTrips();
+    }, []);
+
+    const declineInvitation = useCallback(async (invId: string) => {
+        await supabase.from("invitations").update({ status: "declined" }).eq("id", invId);
+        setInvitations(prev => prev.filter(i => i.id !== invId));
+    }, []);
+
+    return { invitations, loading, sendInvite, acceptInvitation, declineInvitation, refetchInvitations: fetchInvitations };
 }

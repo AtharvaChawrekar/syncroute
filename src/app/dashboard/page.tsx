@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence, PanInfo } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ModeToggle } from "@/components/mode-toggle";
@@ -11,7 +11,7 @@ import {
     X, MoreVertical, Pin, Share2, Trash2, Type, UserPlus,
     CornerUpLeft, ChevronRight, Check, CloudRain, Clock, Download, Lock, Bell
 } from "lucide-react";
-import { useChatMessages, useTrips, useProfile, type Trip, type Message } from "@/hooks/useSyncRoute";
+import { useChatMessages, useTrips, useCurrentUser, useInvitations, type Trip, type Message } from "@/hooks/useSyncRoute";
 
 /* ──────────────────────────────────────────────────────────────── */
 /*  TYPES                                                           */
@@ -168,11 +168,15 @@ function SwipeableMessage({ msg, onReply }: { msg: Message; onReply: (msg: Messa
                 onDrag={handleDrag}
                 onDragEnd={handleDragEnd}
                 animate={{ x: swipeX }}
+                initial={{ opacity: 0, y: 8 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ type: "spring", stiffness: 400, damping: 30 }}
                 className={`flex gap-3 ${msg.isYou ? "justify-end" : ""}`}
                 style={{ x: swipeX, touchAction: "pan-y" }}
             >
                 {!msg.isYou && (
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 text-white"
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 text-white ${msg.isStreaming ? "animate-pulse" : ""}`}
                         style={{ backgroundColor: msg.avatar_color, boxShadow: `0 2px 8px ${msg.avatar_color}40` }}>
                         {msg.avatar}
                     </div>
@@ -191,12 +195,28 @@ function SwipeableMessage({ msg, onReply }: { msg: Message; onReply: (msg: Messa
                         <span className="text-[10px] text-gray-400">{msg.time}</span>
                     </div>
                     <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${msg.isAI
-                        ? "bg-gradient-to-br from-blue-500/10 to-purple-500/10 dark:from-blue-500/15 dark:to-purple-500/15 border border-blue-200 dark:border-blue-500/20 text-gray-800 dark:text-gray-200"
-                        : msg.isYou
-                            ? "bg-blue-600 text-white rounded-br-sm"
-                            : "bg-white dark:bg-[#1A1A1A] border border-gray-200 dark:border-white/5 text-gray-800 dark:text-gray-200 rounded-bl-sm"
+                            ? "bg-gradient-to-br from-blue-500/10 to-purple-500/10 dark:from-blue-500/15 dark:to-purple-500/15 border border-blue-200 dark:border-blue-500/20 text-gray-800 dark:text-gray-200"
+                            : msg.isYou
+                                ? "bg-blue-600 text-white rounded-br-sm"
+                                : "bg-white dark:bg-[#1A1A1A] border border-gray-200 dark:border-white/5 text-gray-800 dark:text-gray-200 rounded-bl-sm"
                         }`}>
-                        {renderWithSafar(msg.text)}
+                        {msg.isStreaming && !msg.text ? (
+                            /* Typing dots when no text yet */
+                            <span className="flex items-center gap-1 h-4">
+                                {[0, 1, 2].map(i => (
+                                    <span key={i} className="w-1.5 h-1.5 rounded-full bg-blue-400/60 animate-bounce"
+                                        style={{ animationDelay: `${i * 120}ms` }} />
+                                ))}
+                            </span>
+                        ) : (
+                            <>
+                                {renderWithSafar(msg.text)}
+                                {msg.isStreaming && (
+                                    /* Blinking cursor while tokens stream in */
+                                    <span className="inline-block w-0.5 h-4 bg-blue-400 ml-0.5 align-middle animate-[blink_0.8s_step-end_infinite]" />
+                                )}
+                            </>
+                        )}
                     </div>
                 </div>
             </motion.div>
@@ -213,17 +233,48 @@ const ALL_INTERESTS = ["Adventure", "Food", "Photography", "Beach", "Culture", "
 
 export default function Dashboard() {
     // ─── DATA HOOKS ────────────────────────────────────────────────
-    const { messages, sendMessage } = useChatMessages("trip_1");
-    const { trips, addTrip, deleteTrip, addCollaborator } = useTrips();
-    const { profile, updateProfile } = useProfile();
+    const { user, profile, loading: authLoading, updateProfile } = useCurrentUser();
+    // Non-null fallback so JSX doesn't need null-guards everywhere
+    const safeProfile = profile ?? { id: "", username: "You", email: "", avatar_color: "#3b82f6", budget_pref: 65, pace_pref: 70, interests: [] as string[] };
+    const { trips, loading: tripsLoading, addTrip, deleteTrip, addCollaborator, ensureSafarDM, refetchTrips } = useTrips(user?.id ?? null);
+
+    // ─── SAFAR DM: ensure workspace trip exists and set as default ──
+    const [activeTripId, setActiveTripId] = useState<string | null>(null);
+    const [dmInitialized, setDmInitialized] = useState(false);
+    useEffect(() => {
+        // Wait until auth is resolved AND trips have finished loading
+        if (!user || tripsLoading || dmInitialized) return;
+        setDmInitialized(true); // run once per session
+        const ws = trips.find(t => t.is_workspace);
+        if (ws) {
+            setActiveTripId(prev => prev ?? ws.id);
+        } else {
+            // New user: no DM yet — create it
+            ensureSafarDM().then(id => {
+                if (id) { setActiveTripId(prev => prev ?? id); refetchTrips(); }
+            });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user, tripsLoading]);
+
+    const activeTrip = activeTripId ?? "";
+    const setActiveTrip = (id: string) => setActiveTripId(id);
+
+    const activeTripData = trips.find(t => t.id === activeTrip);
+    const isWorkspace = activeTripData?.is_workspace ?? false;
+
+    const { messages, loading: msgsLoading, aiLoading, sendMessage } = useChatMessages(
+        activeTrip || null,
+        profile,
+        isWorkspace,
+    );
+
 
     // ─── UI STATE ──────────────────────────────────────────────────
     const [isListening, setIsListening] = useState(false);
     const [messageInput, setMessageInput] = useState("");
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [itineraryOpen, setItineraryOpen] = useState(true);
-    const [activeTrip, setActiveTrip] = useState("safarDM");
-
     // Swipe-to-Reply
     const [replyTo, setReplyTo] = useState<Message | null>(null);
 
@@ -254,10 +305,14 @@ export default function Dashboard() {
         "createTrip" | "profile" | "addCollaborator" | "groupSettings" | "invitations" | null
     >(null);
 
-    // Invitations (UI-only — wire to Supabase later)
-    const [invitations, setInvitations] = useState<Invitation[]>(MOCK_INVITATIONS);
-    const acceptInvitation = (id: string) => setInvitations(prev => prev.filter(inv => inv.id !== id));
-    const declineInvitation = (id: string) => setInvitations(prev => prev.filter(inv => inv.id !== id));
+    // Invitations (real Supabase)
+    const { invitations, sendInvite, acceptInvitation, declineInvitation } = useInvitations(user?.id ?? null);
+    const handleAcceptInvitation = (invId: string, tripId: string) => {
+        if (!user) return;
+        acceptInvitation(invId, tripId, user.id, refetchTrips);
+    };
+    const handleDeclineInvitation = (invId: string) => declineInvitation(invId);
+
 
     // Create trip form
     const [newTripName, setNewTripName] = useState("");
@@ -300,18 +355,23 @@ export default function Dashboard() {
         setMentionQuery(null);
     };
 
-    const handleCreateTrip = () => {
+    const handleCreateTrip = async () => {
         if (!newTripName.trim()) return;
-        addTrip(newTripName, newTripVibe, newTripColor);
+        const newId = await addTrip(newTripName, newTripVibe, newTripColor);
         setNewTripName(""); setNewTripVibe(""); setNewTripColor(THEME_COLORS[0]);
         setModal(null);
+        if (newId) setActiveTrip(newId);
     };
 
-    const handleAddCollaborator = () => {
-        if (!collaboratorName.trim()) return;
-        addCollaborator(activeTrip, collaboratorName.trim());
-        setCollaboratorName("");
-        setModal(null);
+    const [inviteStatus, setInviteStatus] = useState<"idle" | "sending" | "ok" | "not_found" | "already" | "error">("idle");
+    const handleAddCollaborator = async () => {
+        if (!collaboratorName.trim() || !user || !activeTrip) return;
+        setInviteStatus("sending");
+        const result = await sendInvite(activeTrip, user.id, collaboratorName.trim());
+        setInviteStatus(result);
+        if (result === "ok") {
+            setTimeout(() => { setCollaboratorName(""); setModal(null); setInviteStatus("idle"); }, 1200);
+        }
     };
 
     const simulateDisruption = (type: "rain" | "delay") => {
@@ -345,12 +405,13 @@ export default function Dashboard() {
         }
     };
 
-    const activeTripData = trips.find(t => t.id === activeTrip);
+    const activeTripData2 = trips.find(t => t.id === activeTrip);
     // ─── DERIVED STATE ─────────────────────────────────────────────
-    const isSafarDM = activeTrip === "safarDM";
+    const isSafarDM = activeTripData?.is_workspace ?? false;
     const isShared = (activeTripData?.members.length ?? 0) > 1;
-    // Members excluding "You" for subtitle display
-    const otherMembers = activeTripData?.members.filter(m => m !== "You") ?? [];
+    // Members excluding current user for subtitle display
+    const otherMembers = activeTripData?.members.filter(m => m !== profile?.username) ?? [];
+    void activeTripData2; // suppress lint if unused
 
     return (
         <div className="h-screen flex flex-col bg-[#F5F7FA] dark:bg-[#0D0D0D] font-sans transition-colors" onClick={() => setOpenDropdown(null)}>
@@ -373,8 +434,8 @@ export default function Dashboard() {
                     </button>
                     <button onClick={() => setModal("profile")}
                         className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold cursor-pointer ring-2 ring-blue-500/30 hover:ring-blue-500 transition-all"
-                        style={{ backgroundColor: profile.avatar_color }}>
-                        {profile.username.charAt(0)}
+                        style={{ backgroundColor: profile?.avatar_color ?? "#3b82f6" }}>
+                        {(profile?.username ?? "?").charAt(0)}
                     </button>
                 </div>
             </header>
@@ -506,12 +567,12 @@ export default function Dashboard() {
                             <div className="p-3 border-t border-gray-200 dark:border-white/5">
                                 <button onClick={() => setModal("profile")}
                                     className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 dark:hover:bg-white/5 transition-colors cursor-pointer text-left">
-                                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ backgroundColor: profile.avatar_color }}>
-                                        {profile.username.charAt(0)}
+                                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ backgroundColor: profile?.avatar_color ?? "#3b82f6" }}>
+                                        {(profile?.username ?? "?").charAt(0)}
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">{profile.username}</p>
-                                        <p className="text-[11px] text-gray-400 truncate">{profile.email}</p>
+                                        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">{profile?.username ?? "You"}</p>
+                                        <p className="text-[11px] text-gray-400 truncate">{profile?.email ?? ""}</p>
                                     </div>
                                     <Settings className="w-4 h-4 text-gray-400 shrink-0" />
                                 </button>
@@ -902,9 +963,9 @@ export default function Dashboard() {
                     <div>
                         <div className="flex justify-between mb-1.5">
                             <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Budget</p>
-                            <span className="text-sm text-blue-500 font-bold">₹{Math.round(profile.budget_pref * 200 + 5000).toLocaleString()}/day</span>
+                            <span className="text-sm text-blue-500 font-bold">₹{Math.round(safeProfile.budget_pref * 200 + 5000).toLocaleString()}/day</span>
                         </div>
-                        <input type="range" min={0} max={100} value={profile.budget_pref}
+                        <input type="range" min={0} max={100} value={safeProfile.budget_pref}
                             onChange={e => updateProfile({ budget_pref: Number(e.target.value) })}
                             className="w-full accent-blue-500 cursor-pointer" />
                         <div className="flex justify-between text-[10px] text-gray-400 mt-0.5"><span>Budget</span><span>Luxury</span></div>
@@ -912,9 +973,9 @@ export default function Dashboard() {
                     <div>
                         <div className="flex justify-between mb-1.5">
                             <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Travel Pace</p>
-                            <span className="text-sm text-blue-500 font-bold">{profile.pace_pref < 40 ? "Relaxed" : profile.pace_pref < 70 ? "Balanced" : "Fast-paced"}</span>
+                            <span className="text-sm text-blue-500 font-bold">{safeProfile.pace_pref < 40 ? "Relaxed" : safeProfile.pace_pref < 70 ? "Balanced" : "Fast-paced"}</span>
                         </div>
-                        <input type="range" min={0} max={100} value={profile.pace_pref}
+                        <input type="range" min={0} max={100} value={safeProfile.pace_pref}
                             onChange={e => updateProfile({ pace_pref: Number(e.target.value) })}
                             className="w-full accent-blue-500 cursor-pointer" />
                         <div className="flex justify-between text-[10px] text-gray-400 mt-0.5"><span>Chill</span><span>Explorer</span></div>
@@ -923,10 +984,10 @@ export default function Dashboard() {
                         <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2.5">Interests</p>
                         <div className="flex flex-wrap gap-2">
                             {ALL_INTERESTS.map(interest => {
-                                const active = profile.interests.includes(interest);
+                                const active = safeProfile.interests.includes(interest);
                                 return (
                                     <button key={interest}
-                                        onClick={() => updateProfile({ interests: active ? profile.interests.filter(i => i !== interest) : [...profile.interests, interest] })}
+                                        onClick={() => updateProfile({ interests: active ? safeProfile.interests.filter(i => i !== interest) : [...safeProfile.interests, interest] })}
                                         className={`px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer transition-all ${active ? "bg-blue-600 text-white shadow-sm shadow-blue-500/30" : "bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-white/10 hover:border-blue-300"}`}>
                                         {interest}
                                     </button>
@@ -963,9 +1024,13 @@ export default function Dashboard() {
                             placeholder="username"
                             className="w-full h-11 pl-8 pr-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500/30" />
                     </div>
-                    <button onClick={handleAddCollaborator}
-                        className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm cursor-pointer transition-all hover:scale-[1.02] shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">
-                        <UserPlus className="w-4 h-4" /> Send Invite
+                    {inviteStatus === "not_found" && <p className="text-xs text-red-400 text-center">User not found. Check the username and try again.</p>}
+                    {inviteStatus === "already" && <p className="text-xs text-amber-400 text-center">Invite already sent to this user.</p>}
+                    {inviteStatus === "ok" && <p className="text-xs text-green-400 text-center">Invite sent! ✓</p>}
+                    <button onClick={handleAddCollaborator} disabled={inviteStatus === "sending"}
+                        className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold text-sm cursor-pointer transition-all hover:scale-[1.02] shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">
+                        {inviteStatus === "sending" ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                        {inviteStatus === "sending" ? "Sending…" : "Send Invite"}
                     </button>
                 </div>
             </Modal>
@@ -1029,14 +1094,14 @@ export default function Dashboard() {
                                     {/* Actions */}
                                     <div className="flex items-center gap-2 shrink-0">
                                         <button
-                                            onClick={() => declineInvitation(inv.id)}
+                                            onClick={() => handleDeclineInvitation(inv.id)}
                                             title="Decline"
                                             className="w-8 h-8 rounded-xl bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 text-red-500 flex items-center justify-center cursor-pointer transition-all hover:scale-110"
                                         >
                                             <X className="w-4 h-4" />
                                         </button>
                                         <button
-                                            onClick={() => acceptInvitation(inv.id)}
+                                            onClick={() => handleAcceptInvitation(inv.id, inv.trip_id)}
                                             title="Accept"
                                             className="w-8 h-8 rounded-xl bg-green-50 dark:bg-green-500/10 hover:bg-green-100 dark:hover:bg-green-500/20 text-green-600 dark:text-green-400 flex items-center justify-center cursor-pointer transition-all hover:scale-110"
                                         >
