@@ -3,12 +3,15 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
+import { useCallback } from "react";
 import {
-    ChevronLeft, ChevronRight, Check,
+    ChevronLeft, ChevronRight, Check, Loader2, Eye, EyeOff,
     Leaf, Egg, Beef, Sprout, Flower2,
     Train, Plane, Bus, Car, CarTaxiFront,
     User, Users, Home,
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import toast, { Toaster } from "react-hot-toast";
 
 /* ──────────────────────────────────────────────────────────
    SUPABASE-READY FORM STATE
@@ -323,6 +326,91 @@ function Slide4({ state, set }: { state: OnboardingState; set: (p: Partial<Onboa
 }
 
 /* ──────────────────────────────────────────────────────────
+   ONBOARDING PASSWORD INPUT
+────────────────────────────────────────────────────────── */
+function OPasswordInput({ value, onChange, placeholder }: {
+    value: string; onChange: (v: string) => void; placeholder?: string;
+}) {
+    const [show, setShow] = useState(false);
+    return (
+        <div className="relative">
+            <input
+                type={show ? "text" : "password"}
+                value={value}
+                onChange={e => onChange(e.target.value)}
+                placeholder={placeholder ?? "••••••••"}
+                className="w-full h-11 px-4 pr-12 rounded-xl bg-white/5 border border-white/10 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500/40 transition-all placeholder:text-white/30"
+            />
+            <button type="button" onClick={() => setShow(s => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors cursor-pointer"
+                tabIndex={-1}>
+                {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+        </div>
+    );
+}
+
+/* ──────────────────────────────────────────────────────────
+   SLIDE 5 — SIGN UP
+────────────────────────────────────────────────────────── */
+const fieldCls = "w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500/40 transition-all placeholder:text-white/30";
+const labelCls = "text-xs font-semibold text-white/50 uppercase tracking-widest mb-1.5";
+
+function Slide5({
+    username, onUsername,
+    email, onEmail,
+    password, onPassword,
+    confirm, onConfirm,
+    usernameError, onBlurUsername,
+}: {
+    username: string; onUsername: (v: string) => void;
+    email: string; onEmail: (v: string) => void;
+    password: string; onPassword: (v: string) => void;
+    confirm: string; onConfirm: (v: string) => void;
+    usernameError: string; onBlurUsername: () => void;
+}) {
+    return (
+        <div className="space-y-4">
+            <div>
+                <p className={labelCls}>Username</p>
+                <input
+                    value={username}
+                    onChange={e => onUsername(e.target.value.replace(/\s/g, ""))}
+                    onBlur={onBlurUsername}
+                    placeholder="e.g. rahul_travels (no spaces)"
+                    className={`${fieldCls} ${usernameError ? "border-red-500/60" : ""}`}
+                />
+                {usernameError && <p className="text-xs text-red-400 mt-1">{usernameError}</p>}
+            </div>
+            <div>
+                <p className={labelCls}>Email Address</p>
+                <input
+                    value={email}
+                    onChange={e => onEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    type="email"
+                    className={fieldCls}
+                />
+            </div>
+            <div>
+                <p className={labelCls}>Password</p>
+                <OPasswordInput value={password} onChange={onPassword} placeholder="Min. 8 characters" />
+                {password && password.length < 8 && (
+                    <p className="text-xs text-red-400 mt-1">At least 8 characters required.</p>
+                )}
+            </div>
+            <div>
+                <p className={labelCls}>Confirm Password</p>
+                <OPasswordInput value={confirm} onChange={onConfirm} placeholder="Repeat your password" />
+                {confirm && password !== confirm && (
+                    <p className="text-xs text-red-400 mt-1">Passwords do not match.</p>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/* ──────────────────────────────────────────────────────────
    SLIDE META
 ────────────────────────────────────────────────────────── */
 const SLIDES = [
@@ -330,6 +418,7 @@ const SLIDES = [
     { heading: "How do you move and eat?", sub: "Help us personalise every meal and journey." },
     { heading: "Who do you explore with?", sub: "We'll tailor recommendations for your crew." },
     { heading: "What makes a trip memorable?", sub: "Select all that spark joy for you." },
+    { heading: "Almost there!", sub: "Create your account to save your preferences and start planning." },
 ];
 
 /* ──────────────────────────────────────────────────────────
@@ -340,6 +429,27 @@ export default function OnboardingPage() {
     const [step, setStep] = useState(0);
     const [dir, setDir] = useState(1);
     const [form, setForm] = useState<OnboardingState>(INITIAL_STATE);
+    const [loading, setLoading] = useState(false);
+
+    // ── Slide5 sign-up fields ──
+    const [username, setUsername] = useState("");
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [confirm, setConfirm] = useState("");
+    const [usernameError, setUsernameError] = useState("");
+
+    // Username: strip spaces inline, check uniqueness on blur
+    const handleUsername = useCallback((val: string) => {
+        setUsername(val);
+        if (val.length > 0 && val.length < 3) setUsernameError("At least 3 characters.");
+        else setUsernameError("");
+    }, []);
+
+    const checkUsernameUnique = useCallback(async () => {
+        if (!username || usernameError) return;
+        const { data } = await supabase.from("users").select("id").eq("username", username).maybeSingle();
+        if (data) setUsernameError("Username already taken.");
+    }, [username, usernameError]);
 
     const setField = (patch: Partial<OnboardingState>) => setForm(prev => ({ ...prev, ...patch }));
 
@@ -348,9 +458,59 @@ export default function OnboardingPage() {
         setStep(newStep);
     };
 
-    const handleSubmit = () => {
-        // TODO: await supabase.from('profiles').upsert({ ...form, user_id: session.user.id })
-        console.log("Onboarding payload →", JSON.stringify(form, null, 2));
+    const handleSubmit = async () => {
+        // ── Validate sign-up fields ──
+        if (!username.trim() || !email.trim() || !password || !confirm) {
+            toast.error("Please fill in all fields."); return;
+        }
+        if (username.trim().length < 3) {
+            toast.error("Username must be at least 3 characters."); return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+            toast.error("Please enter a valid email address."); return;
+        }
+        if (password.length < 8) {
+            toast.error("Password must be at least 8 characters."); return;
+        }
+        if (password !== confirm) {
+            toast.error("Passwords do not match."); return;
+        }
+        if (usernameError) {
+            toast.error(usernameError); return;
+        }
+
+        setLoading(true);
+
+        // 1) Create Supabase Auth user
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+            email: email.trim(),
+            password,
+        });
+        if (authError) {
+            setLoading(false);
+            toast.error(authError.message); return;
+        }
+
+        // 2) Insert public profile + preferences
+        const userId = authData.user?.id;
+        if (userId) {
+            const { error: dbError } = await supabase.from("users").insert({
+                id: userId,
+                username: username.trim(),
+                email: email.trim(),
+                preferences: form,
+            });
+            if (dbError) {
+                setLoading(false);
+                toast.error(dbError.message.includes("unique")
+                    ? "Username already taken. Try another."
+                    : "Account created but profile save failed.");
+                return;
+            }
+        }
+
+        setLoading(false);
+        toast.success("Welcome to SyncRoute! ✈️ Let's start planning.");
         router.push("/dashboard");
     };
 
@@ -362,6 +522,23 @@ export default function OnboardingPage() {
 
     return (
         <div className="fixed inset-0 flex items-center justify-center font-sans overflow-hidden">
+            {/* Global toast — z-index above all overlays */}
+            <Toaster
+                position="top-center"
+                containerStyle={{ zIndex: 99999 }}
+                toastOptions={{
+                    style: {
+                        background: "#1a1a1a",
+                        color: "#f3f4f6",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        borderRadius: "14px",
+                        fontSize: "13px",
+                        fontWeight: 500,
+                    },
+                    success: { iconTheme: { primary: "#3b82f6", secondary: "#fff" } },
+                    error: { iconTheme: { primary: "#ef4444", secondary: "#fff" } },
+                }}
+            />
 
             {/* ── Background ── */}
             <div className="absolute inset-0 z-0">
@@ -387,7 +564,7 @@ export default function OnboardingPage() {
 
             {/* ── Step counter top-right ── */}
             <p className="absolute top-7 right-8 z-20 text-xs text-white/40 font-semibold tracking-widest uppercase">
-                Step {step + 1} of 4
+                Step {step + 1} of 5
             </p>
 
             {/* ── Glassmorphic Card ── */}
@@ -405,7 +582,7 @@ export default function OnboardingPage() {
                         >
                             <div className="flex items-center gap-2 mb-2">
                                 <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">
-                                    {["Budget & Pacing", "Dietary & Transport", "Travel Style", "Interests"][step]}
+                                    {["Budget & Pacing", "Dietary & Transport", "Travel Style", "Interests", "Create Account"][step]}
                                 </span>
                             </div>
                             <h1 className="text-2xl sm:text-3xl font-bold text-white leading-tight">{SLIDES[step].heading}</h1>
@@ -429,6 +606,15 @@ export default function OnboardingPage() {
                                 {step === 1 && <Slide2 state={form} set={setField} />}
                                 {step === 2 && <Slide3 state={form} set={setField} />}
                                 {step === 3 && <Slide4 state={form} set={setField} />}
+                                {step === 4 && (
+                                    <Slide5
+                                        username={username} onUsername={handleUsername}
+                                        email={email} onEmail={setEmail}
+                                        password={password} onPassword={setPassword}
+                                        confirm={confirm} onConfirm={setConfirm}
+                                        usernameError={usernameError} onBlurUsername={checkUsernameUnique}
+                                    />
+                                )}
                             </motion.div>
                         </AnimatePresence>
                     </div>
@@ -450,7 +636,7 @@ export default function OnboardingPage() {
 
                         {/* Dots */}
                         <div className="flex gap-2 items-center">
-                            {[0, 1, 2, 3].map(i => (
+                            {[0, 1, 2, 3, 4].map(i => (
                                 <button key={i} onClick={() => i < step && go(i)} className="cursor-pointer">
                                     <motion.div
                                         animate={{ width: i === step ? 24 : 8, backgroundColor: i === step ? "#3b82f6" : i < step ? "#60a5fa" : "rgba(255,255,255,0.2)" }}
@@ -463,7 +649,7 @@ export default function OnboardingPage() {
 
                         {/* Next / Submit */}
                         <div className="w-24 flex justify-end">
-                            {step < 3 ? (
+                            {step < 4 ? (
                                 <motion.button
                                     whileTap={{ scale: 0.95 }}
                                     onClick={() => go(step + 1)}
@@ -473,11 +659,14 @@ export default function OnboardingPage() {
                                 </motion.button>
                             ) : (
                                 <motion.button
-                                    whileTap={{ scale: 0.95 }}
+                                    whileTap={{ scale: loading ? 1 : 0.95 }}
                                     onClick={handleSubmit}
-                                    className="flex items-center gap-1.5 text-sm text-white bg-blue-600 hover:bg-blue-700 px-4 py-2.5 rounded-xl font-bold cursor-pointer transition-all shadow-lg shadow-blue-500/30 whitespace-nowrap"
+                                    disabled={loading}
+                                    className="flex items-center gap-1.5 text-sm text-white bg-blue-600 hover:bg-blue-700 px-4 py-2.5 rounded-xl font-bold cursor-pointer transition-all shadow-lg shadow-blue-500/30 whitespace-nowrap disabled:opacity-70 disabled:cursor-not-allowed"
                                 >
-                                    <Check className="w-4 h-4" /> Create Account
+                                    {loading
+                                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                                        : <><Check className="w-4 h-4" /> Create Account</>}
                                 </motion.button>
                             )}
                         </div>

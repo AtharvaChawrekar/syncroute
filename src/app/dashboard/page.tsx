@@ -9,13 +9,27 @@ import {
     Settings, Plane, GripVertical, MessageSquare, Users,
     Edit3, Coffee, Mountain, Ship, Camera, UtensilsCrossed,
     X, MoreVertical, Pin, Share2, Trash2, Type, UserPlus,
-    CornerUpLeft, ChevronRight, Check, CloudRain, Clock, Download, Lock
+    CornerUpLeft, ChevronRight, Check, CloudRain, Clock, Download, Lock, Bell
 } from "lucide-react";
 import { useChatMessages, useTrips, useProfile, type Trip, type Message } from "@/hooks/useSyncRoute";
 
 /* ──────────────────────────────────────────────────────────────── */
 /*  TYPES                                                           */
 /* ──────────────────────────────────────────────────────────────── */
+
+// ── Invitations (UI-only; wire to Supabase later) ──
+interface Invitation {
+    id: string;
+    fromUsername: string;   // person who sent the invite
+    tripName: string;       // name of the trip
+    tripColor: string;      // accent colour for visual indicator
+}
+
+const MOCK_INVITATIONS: Invitation[] = [
+    { id: "inv_1", fromUsername: "priya_travels", tripName: "Goa Trip with College Bros", tripColor: "#3b82f6" },
+    { id: "inv_2", fromUsername: "aakash99", tripName: "Family Europe Tour", tripColor: "#a855f7" },
+];
+
 
 interface ItineraryActivity {
     time: string;
@@ -237,8 +251,13 @@ export default function Dashboard() {
 
     // ─── MODAL STATE ───────────────────────────────────────────────
     const [modal, setModal] = useState<
-        "createTrip" | "profile" | "addCollaborator" | "groupSettings" | null
+        "createTrip" | "profile" | "addCollaborator" | "groupSettings" | "invitations" | null
     >(null);
+
+    // Invitations (UI-only — wire to Supabase later)
+    const [invitations, setInvitations] = useState<Invitation[]>(MOCK_INVITATIONS);
+    const acceptInvitation = (id: string) => setInvitations(prev => prev.filter(inv => inv.id !== id));
+    const declineInvitation = (id: string) => setInvitations(prev => prev.filter(inv => inv.id !== id));
 
     // Create trip form
     const [newTripName, setNewTripName] = useState("");
@@ -463,6 +482,25 @@ export default function Dashboard() {
                                     </div>
                                 ))}
                             </div>
+
+                            {/* ── Invitations button (above profile) ── */}
+                            <div className="px-4 pb-2">
+                                <button
+                                    onClick={() => setModal("invitations")}
+                                    className="w-full h-10 flex items-center justify-center gap-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-md shadow-blue-500/20 cursor-pointer transition-all hover:scale-[1.02] relative"
+                                >
+                                    <div className="relative shrink-0">
+                                        <Bell className="w-4 h-4 text-white" />
+                                        {invitations.length > 0 && (
+                                            <span className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-blue-600">
+                                                {invitations.length}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <span>View Invitations</span>
+                                </button>
+                            </div>
+
 
                             {/* User Profile snippet */}
                             <div className="p-3 border-t border-gray-200 dark:border-white/5">
@@ -930,6 +968,89 @@ export default function Dashboard() {
                         <UserPlus className="w-4 h-4" /> Send Invite
                     </button>
                 </div>
+            </Modal>
+
+            {/* ── Invitations ── */}
+            <Modal open={modal === "invitations"} onClose={() => setModal(null)}>
+                <div className="flex items-center gap-3 mb-5">
+                    <div className="relative">
+                        <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-500/10 flex items-center justify-center">
+                            <Bell className="w-5 h-5 text-amber-500" />
+                        </div>
+                        {invitations.length > 0 && (
+                            <span className="absolute -top-1 -right-1 w-4.5 h-4.5 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                                {invitations.length}
+                            </span>
+                        )}
+                    </div>
+                    <div>
+                        <h2 className="font-heading text-2xl text-gray-900 dark:text-white">Trip Invitations</h2>
+                        <p className="text-xs text-gray-400">People who want to plan with you</p>
+                    </div>
+                </div>
+
+                {invitations.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 gap-3">
+                        <div className="w-14 h-14 rounded-2xl bg-gray-50 dark:bg-white/5 flex items-center justify-center">
+                            <Bell className="w-7 h-7 text-gray-300 dark:text-gray-600" />
+                        </div>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
+                            You&apos;re all caught up!<br />
+                            <span className="text-xs text-gray-400">No pending invitations.</span>
+                        </p>
+                    </div>
+                ) : (
+                    <div className="space-y-3">
+                        <AnimatePresence>
+                            {invitations.map(inv => (
+                                <motion.div
+                                    key={inv.id}
+                                    layout
+                                    initial={{ opacity: 0, y: 12, scale: 0.97 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, x: -40, scale: 0.95 }}
+                                    transition={{ type: "spring", stiffness: 350, damping: 28 }}
+                                    className="flex items-center gap-3 p-3.5 rounded-2xl border border-gray-100 dark:border-white/8 bg-gray-50 dark:bg-white/[0.03] hover:border-blue-200 dark:hover:border-blue-500/20 transition-colors"
+                                >
+                                    {/* Trip color avatar */}
+                                    <div
+                                        className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold shrink-0"
+                                        style={{ backgroundColor: inv.tripColor }}
+                                    >
+                                        {inv.tripName.charAt(0)}
+                                    </div>
+
+                                    {/* Info */}
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">@{inv.fromUsername}</p>
+                                        <p className="text-xs text-gray-400 truncate">invited you to &ldquo;{inv.tripName}&rdquo;</p>
+                                    </div>
+
+                                    {/* Actions */}
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <button
+                                            onClick={() => declineInvitation(inv.id)}
+                                            title="Decline"
+                                            className="w-8 h-8 rounded-xl bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 text-red-500 flex items-center justify-center cursor-pointer transition-all hover:scale-110"
+                                        >
+                                            <X className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                            onClick={() => acceptInvitation(inv.id)}
+                                            title="Accept"
+                                            className="w-8 h-8 rounded-xl bg-green-50 dark:bg-green-500/10 hover:bg-green-100 dark:hover:bg-green-500/20 text-green-600 dark:text-green-400 flex items-center justify-center cursor-pointer transition-all hover:scale-110"
+                                        >
+                                            <Check className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            ))}
+                        </AnimatePresence>
+                        <p className="text-center text-[11px] text-gray-400 dark:text-gray-500 pt-1">
+                            Accepting adds the trip to your sidebar.
+                        </p>
+                    </div>
+                )}
             </Modal>
 
             {/* Group Settings */}

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Poppins, Bebas_Neue } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "react-hot-toast";
 import "./globals.css";
 
 const poppins = Poppins({
@@ -52,6 +53,31 @@ export default function RootLayout({
         >
           {children}
         </ThemeProvider>
+
+        {/*
+          Global Toaster — placed AFTER ThemeProvider/children so it is the
+          last element appended to <body>. This guarantees it paints above
+          every Radix UI portal (Dialog overlays, Dropdowns, etc.) regardless
+          of those portals' z-index values, because DOM paint order wins when
+          stacking contexts have equal z-index.
+        */}
+        <Toaster
+          position="top-center"
+          containerStyle={{ zIndex: 999999 }}
+          toastOptions={{
+            style: {
+              background: "#1a1a1a",
+              color: "#f3f4f6",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: "14px",
+              fontSize: "13px",
+              fontWeight: 500,
+              backdropFilter: "blur(12px)",
+            },
+            success: { iconTheme: { primary: "#3b82f6", secondary: "#fff" } },
+            error: { iconTheme: { primary: "#ef4444", secondary: "#fff" } },
+          }}
+        />
       </body>
     </html>
   );

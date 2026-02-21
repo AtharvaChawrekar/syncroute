@@ -1,13 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { ModeToggle } from "@/components/mode-toggle";
-import { ArrowLeft, Mail, CheckCircle } from "lucide-react";
+import { ArrowLeft, Mail, CheckCircle, Eye, EyeOff, Loader2 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import toast, { Toaster } from "react-hot-toast";
 
 /* ─── Shared Input Styles ─── */
 const inputBase =
@@ -18,6 +20,38 @@ function Label({ children }: { children: React.ReactNode }) {
         <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5 tracking-wider uppercase">
             {children}
         </p>
+    );
+}
+
+/* ─── Password Input with Eye Toggle ─── */
+function PasswordInput({
+    value, onChange, placeholder, id,
+}: {
+    value: string;
+    onChange: (v: string) => void;
+    placeholder?: string;
+    id?: string;
+}) {
+    const [show, setShow] = useState(false);
+    return (
+        <div className="relative">
+            <input
+                id={id}
+                type={show ? "text" : "password"}
+                value={value}
+                onChange={e => onChange(e.target.value)}
+                placeholder={placeholder ?? "••••••••"}
+                className={`${inputBase} pr-12`}
+            />
+            <button
+                type="button"
+                onClick={() => setShow(s => !s)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors cursor-pointer"
+                tabIndex={-1}
+            >
+                {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+        </div>
     );
 }
 
@@ -41,9 +75,22 @@ function AuthModal({ open, initialView, onClose }: {
     initialView: View;
     onClose: () => void;
 }) {
+    const router = useRouter();
     const [view, setView] = useState<View>(initialView);
     const [direction, setDirection] = useState<Direction>(1);
     const [forgotEmail, setForgotEmail] = useState("");
+    const [loading, setLoading] = useState(false);
+
+    // ── Login form state ──
+    const [loginEmail, setLoginEmail] = useState("");
+    const [loginPassword, setLoginPassword] = useState("");
+
+    // ── Sign-up form state ──
+    const [signupUsername, setSignupUsername] = useState("");
+    const [signupEmail, setSignupEmail] = useState("");
+    const [signupPassword, setSignupPassword] = useState("");
+    const [signupConfirm, setSignupConfirm] = useState("");
+    const [usernameError, setUsernameError] = useState("");
 
     const navigate = (to: View, dir: Direction = 1) => {
         setDirection(dir);
@@ -53,6 +100,126 @@ function AuthModal({ open, initialView, onClose }: {
     // Sync view when modal reopens
     const handleOpenChange = (v: boolean) => {
         if (!v) { onClose(); setTimeout(() => setView(initialView), 300); }
+    };
+
+    // Username validation: no spaces, debounced uniqueness check
+    const validateUsername = useCallback(async (val: string) => {
+        setSignupUsername(val);
+        if (!val) { setUsernameError(""); return; }
+        if (/\s/.test(val)) { setUsernameError("Username cannot contain spaces."); return; }
+        if (val.length < 3) { setUsernameError("At least 3 characters."); return; }
+        setUsernameError("");
+    }, []);
+
+    // Check uniqueness on blur to avoid excessive DB calls
+    const checkUsernameUnique = async () => {
+        if (!signupUsername || usernameError) return;
+        const { data } = await supabase
+            .from("users")
+            .select("id")
+            .eq("username", signupUsername)
+            .maybeSingle();
+        if (data) setUsernameError("Username is already taken.");
+    };
+
+    /* ─── LOGIN HANDLER ─── */
+    const handleLogin = async () => {
+        if (!loginEmail.trim() || !loginPassword) {
+            toast.error("Please fill in all fields.");
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail.trim())) {
+            toast.error("Please enter a valid email address.");
+            return;
+        }
+        if (loginPassword.length < 8) {
+            toast.error("Password must be at least 8 characters.");
+            return;
+        }
+        setLoading(true);
+        const { error } = await supabase.auth.signInWithPassword({
+            email: loginEmail.trim(),
+            password: loginPassword,
+        });
+        setLoading(false);
+        if (error) {
+            toast.error(error.message === "Invalid login credentials"
+                ? "Invalid email or password." : error.message);
+            return;
+        }
+        toast.success("Welcome back! Redirecting…");
+        onClose();
+        router.push("/dashboard");
+    };
+
+    /* ─── SIGNUP HANDLER ─── */
+    const handleSignup = async () => {
+        if (!signupUsername.trim() || !signupEmail.trim() || !signupPassword || !signupConfirm) {
+            toast.error("Please fill in all fields.");
+            return;
+        }
+        if (/\s/.test(signupUsername)) {
+            toast.error("Username cannot contain spaces.");
+            return;
+        }
+        if (signupPassword.length < 8) {
+            toast.error("Password must be at least 8 characters.");
+            return;
+        }
+        if (signupPassword !== signupConfirm) {
+            toast.error("Passwords do not match.");
+            return;
+        }
+        if (usernameError) {
+            toast.error(usernameError);
+            return;
+        }
+        setLoading(true);
+        // 1) Create auth user
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+            email: signupEmail.trim(),
+            password: signupPassword,
+        });
+        if (authError) {
+            setLoading(false);
+            toast.error(authError.message);
+            return;
+        }
+        // 2) Insert user row into public.users
+        const userId = authData.user?.id;
+        if (userId) {
+            const { error: dbError } = await supabase.from("users").insert({
+                id: userId,
+                username: signupUsername.trim(),
+                email: signupEmail.trim(),
+                preferences: {},
+            });
+            if (dbError) {
+                setLoading(false);
+                if (dbError.message.includes("unique")) {
+                    toast.error("Username is already taken. Try another.");
+                } else {
+                    toast.error("Account created but profile save failed.");
+                }
+                return;
+            }
+        }
+        setLoading(false);
+        toast.success("Account created! Heading to onboarding…");
+        onClose();
+        router.push("/onboarding");
+    };
+
+    /* ─── FORGOT PASSWORD HANDLER ─── */
+    const handleForgotPassword = async () => {
+        if (!forgotEmail.trim()) { toast.error("Please enter your email."); return; }
+        setLoading(true);
+        const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
+            redirectTo: `${window.location.origin}/reset-password`,
+        });
+        setLoading(false);
+        if (error) { toast.error(error.message); return; }
+        navigate("sent", 1);
     };
 
     const transition = { type: "tween" as const, ease: "easeInOut" as const, duration: 0.28 };
@@ -75,7 +242,14 @@ function AuthModal({ open, initialView, onClose }: {
                             <div className="space-y-5">
                                 <div>
                                     <Label>Email Address</Label>
-                                    <input className={inputBase} placeholder="you@example.com" />
+                                    <input
+                                        value={loginEmail}
+                                        onChange={e => setLoginEmail(e.target.value)}
+                                        className={inputBase}
+                                        placeholder="you@example.com"
+                                        type="email"
+                                        onKeyDown={e => e.key === "Enter" && handleLogin()}
+                                    />
                                 </div>
                                 <div>
                                     <div className="flex items-center justify-between">
@@ -85,14 +259,15 @@ function AuthModal({ open, initialView, onClose }: {
                                             Forgot Password?
                                         </button>
                                     </div>
-                                    <input className={inputBase} type="password" placeholder="••••••••" />
+                                    <PasswordInput value={loginPassword} onChange={setLoginPassword} />
                                 </div>
 
-                                <a href="/dashboard" className="block">
-                                    <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-12 text-sm font-semibold shadow-lg shadow-blue-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer">
-                                        Login
-                                    </Button>
-                                </a>
+                                <Button
+                                    onClick={handleLogin}
+                                    disabled={loading}
+                                    className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-12 text-sm font-semibold shadow-lg shadow-blue-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed">
+                                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Login"}
+                                </Button>
 
                                 <p className="text-center text-xs text-gray-500 dark:text-gray-400">
                                     Don&apos;t have an account?{" "}
@@ -115,26 +290,45 @@ function AuthModal({ open, initialView, onClose }: {
                             <div className="space-y-4">
                                 <div>
                                     <Label>Username</Label>
-                                    <input className={inputBase} placeholder="e.g. rahul_travels" />
+                                    <input
+                                        value={signupUsername}
+                                        onChange={e => validateUsername(e.target.value)}
+                                        onBlur={checkUsernameUnique}
+                                        className={`${inputBase} ${usernameError ? "border-red-400 focus:ring-red-400/30" : ""}`}
+                                        placeholder="e.g. rahul_travels (no spaces)"
+                                    />
+                                    {usernameError && (
+                                        <p className="text-xs text-red-500 mt-1">{usernameError}</p>
+                                    )}
                                 </div>
                                 <div>
                                     <Label>Email Address</Label>
-                                    <input className={inputBase} placeholder="you@example.com" />
+                                    <input
+                                        value={signupEmail}
+                                        onChange={e => setSignupEmail(e.target.value)}
+                                        className={inputBase}
+                                        placeholder="you@example.com"
+                                        type="email"
+                                    />
                                 </div>
                                 <div>
                                     <Label>Password</Label>
-                                    <input className={inputBase} type="password" placeholder="Min. 8 characters" />
+                                    <PasswordInput value={signupPassword} onChange={setSignupPassword} placeholder="Min. 8 characters" />
                                 </div>
                                 <div>
                                     <Label>Confirm Password</Label>
-                                    <input className={inputBase} type="password" placeholder="Repeat your password" />
+                                    <PasswordInput value={signupConfirm} onChange={setSignupConfirm} placeholder="Repeat your password" />
+                                    {signupConfirm && signupPassword !== signupConfirm && (
+                                        <p className="text-xs text-red-500 mt-1">Passwords do not match.</p>
+                                    )}
                                 </div>
 
-                                <a href="/dashboard" className="block pt-1">
-                                    <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-12 text-sm font-semibold shadow-lg shadow-blue-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer">
-                                        Create Account
-                                    </Button>
-                                </a>
+                                <Button
+                                    onClick={handleSignup}
+                                    disabled={loading}
+                                    className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-12 text-sm font-semibold shadow-lg shadow-blue-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer pt-1 disabled:opacity-70 disabled:cursor-not-allowed">
+                                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create Account"}
+                                </Button>
 
                                 <p className="text-center text-xs text-gray-500 dark:text-gray-400">
                                     Already have an account?{" "}
@@ -175,12 +369,20 @@ function AuthModal({ open, initialView, onClose }: {
                             <div className="space-y-4">
                                 <div>
                                     <Label>Email Address</Label>
-                                    <input className={inputBase} placeholder="you@example.com"
-                                        value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} autoFocus />
+                                    <input
+                                        className={inputBase}
+                                        placeholder="you@example.com"
+                                        value={forgotEmail}
+                                        onChange={e => setForgotEmail(e.target.value)}
+                                        onKeyDown={e => e.key === "Enter" && handleForgotPassword()}
+                                        autoFocus
+                                    />
                                 </div>
-                                <Button onClick={() => { if (forgotEmail.trim()) navigate("sent", 1); }}
-                                    className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-12 text-sm font-semibold shadow-lg shadow-blue-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer">
-                                    Send Reset Link
+                                <Button
+                                    onClick={handleForgotPassword}
+                                    disabled={loading}
+                                    className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-12 text-sm font-semibold shadow-lg shadow-blue-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer disabled:opacity-70">
+                                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Send Reset Link"}
                                 </Button>
                             </div>
                         </motion.div>
@@ -234,7 +436,6 @@ function AuthButtonsInner() {
         if (searchParams.get("login") === "true") {
             setInitialView("login");
             setOpen(true);
-            // Clean the URL without re-render
             router.replace("/", { scroll: false });
         }
     }, [searchParams, router]);
@@ -243,6 +444,24 @@ function AuthButtonsInner() {
 
     return (
         <div className="flex items-center gap-3">
+            {/* Global toast renderer — lives here so it's always mounted when modal is open */}
+            <Toaster
+                position="top-center"
+                containerStyle={{ zIndex: 99999 }}
+                toastOptions={{
+                    style: {
+                        background: "#1a1a1a",
+                        color: "#f3f4f6",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        borderRadius: "14px",
+                        fontSize: "13px",
+                        fontWeight: 500,
+                        backdropFilter: "blur(12px)",
+                    },
+                    success: { iconTheme: { primary: "#3b82f6", secondary: "#fff" } },
+                    error: { iconTheme: { primary: "#ef4444", secondary: "#fff" } },
+                }}
+            />
             <ModeToggle />
             <button onClick={() => openAs("login")}
                 className="text-sm font-semibold text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer px-2">
