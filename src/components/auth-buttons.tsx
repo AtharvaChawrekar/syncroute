@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -219,10 +220,24 @@ function AuthModal({ open, initialView, onClose }: {
     );
 }
 
+import { Suspense } from "react";
+
 /* ─── Exported Navbar Auth Section ─── */
-export function AuthButtons() {
+function AuthButtonsInner() {
     const [open, setOpen] = useState(false);
     const [initialView, setInitialView] = useState<View>("login");
+    const searchParams = useSearchParams();
+    const router = useRouter();
+
+    // Auto-open login modal when redirected from onboarding via /?login=true
+    useEffect(() => {
+        if (searchParams.get("login") === "true") {
+            setInitialView("login");
+            setOpen(true);
+            // Clean the URL without re-render
+            router.replace("/", { scroll: false });
+        }
+    }, [searchParams, router]);
 
     const openAs = (view: View) => { setInitialView(view); setOpen(true); };
 
@@ -240,5 +255,13 @@ export function AuthButtons() {
             </a>
             <AuthModal open={open} initialView={initialView} onClose={() => setOpen(false)} />
         </div>
+    );
+}
+
+export function AuthButtons() {
+    return (
+        <Suspense fallback={<div className="flex items-center gap-3 h-9 w-40" />}>
+            <AuthButtonsInner />
+        </Suspense>
     );
 }

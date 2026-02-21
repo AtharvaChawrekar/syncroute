@@ -3,7 +3,12 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Check } from "lucide-react";
+import {
+    ChevronLeft, ChevronRight, Check,
+    Leaf, Egg, Beef, Sprout, Flower2,
+    Train, Plane, Bus, Car, CarTaxiFront,
+    User, Users, Home,
+} from "lucide-react";
 
 /* ──────────────────────────────────────────────────────────
    SUPABASE-READY FORM STATE
@@ -34,28 +39,26 @@ const INITIAL_STATE: OnboardingState = {
 /* ──────────────────────────────────────────────────────────
    CONSTANTS
 ────────────────────────────────────────────────────────── */
-const DIETARY = [
-    { id: "veg", label: "Pure Veg", icon: "🥦" },
-    { id: "egg", label: "Eggetarian", icon: "🥚" },
-    { id: "nonveg", label: "Non-Veg", icon: "🍖" },
-    { id: "vegan", label: "Vegan", icon: "🌱" },
-    { id: "jain", label: "Jain", icon: "🕊️" },
+const DIETARY: { id: string; label: string; icon: React.ReactNode; color: string }[] = [
+    { id: "veg", label: "Pure Veg", icon: <Leaf className="w-6 h-6" />, color: "text-green-400" },
+    { id: "egg", label: "Eggetarian", icon: <Egg className="w-6 h-6" />, color: "text-amber-400" },
+    { id: "nonveg", label: "Non-Veg", icon: <Beef className="w-6 h-6" />, color: "text-red-400" },
+    { id: "vegan", label: "Vegan", icon: <Sprout className="w-6 h-6" />, color: "text-emerald-400" },
+    { id: "jain", label: "Jain", icon: <Flower2 className="w-6 h-6" />, color: "text-purple-400" },
 ];
 
-const TRANSPORT = [
-    { id: "train", label: "Train", icon: "🚆" },
-    { id: "flight", label: "Flight", icon: "✈️" },
-    { id: "bus", label: "Bus", icon: "🚌" },
-    { id: "drive", label: "Self-Drive", icon: "🚗" },
-    { id: "cab", label: "Cab/Taxi", icon: "🚕" },
+const TRANSPORT: { id: string; label: string; icon: React.ReactNode }[] = [
+    { id: "train", label: "Train", icon: <Train className="w-4 h-4" /> },
+    { id: "flight", label: "Flight", icon: <Plane className="w-4 h-4" /> },
+    { id: "bus", label: "Bus", icon: <Bus className="w-4 h-4" /> },
+    { id: "drive", label: "Self-Drive", icon: <Car className="w-4 h-4" /> },
+    { id: "cab", label: "Cab/Taxi", icon: <CarTaxiFront className="w-4 h-4" /> },
 ];
 
-const TRAVEL_STYLE = [
-    { id: "solo", label: "Solo", icon: "🧍", desc: "Just me, myself & I" },
-    { id: "partner", label: "With Partner", icon: "💑", desc: "Romantic adventures" },
-    { id: "friends", label: "With Friends", icon: "👯", desc: "Crew mode on" },
-    { id: "family", label: "With Family", icon: "👨‍👩‍👧‍👦", desc: "Everyone's together" },
-    { id: "kids", label: "With Kids", icon: "🧒", desc: "Kid-friendly escapes" },
+const TRAVEL_STYLE: { id: string; label: string; icon: React.ReactNode; color: string; desc: string }[] = [
+    { id: "solo", label: "Solo", icon: <User className="w-7 h-7" />, color: "text-blue-400", desc: "Just me, myself & I" },
+    { id: "friends", label: "With Friends", icon: <Users className="w-7 h-7" />, color: "text-purple-400", desc: "Crew mode on" },
+    { id: "family", label: "With Family", icon: <Home className="w-7 h-7" />, color: "text-green-400", desc: "Everyone's together" },
 ];
 
 const INTERESTS = [
@@ -114,27 +117,55 @@ function Slider({ min, max, value, onChange }:
 }
 
 /* ──────────────────────────────────────────────────────────
-   DUAL THUMB (Time Window) — simulated with two overlapping sliders
+   TIME PICKER — inline spinner, no dropdown, no clipping
 ────────────────────────────────────────────────────────── */
-function DualSlider({ startHour, endHour, onChangeStart, onChangeEnd }:
-    { startHour: number; endHour: number; onChangeStart: (v: number) => void; onChangeEnd: (v: number) => void }) {
-    const MIN = 4; const MAX = 24;
-    const s = ((startHour - MIN) / (MAX - MIN)) * 100;
-    const e = ((endHour - MIN) / (MAX - MIN)) * 100;
+function TimePicker({
+    label, hour24, onChange,
+}: { label: string; hour24: number; onChange: (h: number) => void }) {
+    const displayHour = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
+    const isPM = hour24 >= 12;
+
+    const cycle = (delta: number) => {
+        // spin 1-12 in 12h space, then convert back
+        const next = ((displayHour - 1 + delta + 12) % 12) + 1;
+        const base = isPM ? (next === 12 ? 12 : next + 12) : (next === 12 ? 0 : next);
+        onChange(Math.min(base, 23));
+    };
+
+    const toggleAmPm = (pm: boolean) => {
+        if (pm && !isPM) onChange(hour24 === 0 ? 12 : Math.min(hour24 + 12, 23));
+        if (!pm && isPM) onChange(hour24 === 12 ? 0 : hour24 - 12);
+    };
+
     return (
-        <div className="relative h-6 flex items-center mt-1">
-            <div className="absolute w-full h-1.5 rounded-full bg-white/10" />
-            <div className="absolute h-1.5 rounded-full bg-blue-500" style={{ left: `${s}%`, width: `${e - s}%` }} />
-            {/* Start thumb */}
-            <input type="range" min={MIN} max={endHour - 1} value={startHour}
-                onChange={e => onChangeStart(Number(e.target.value))}
-                className="absolute w-full h-full opacity-0 cursor-pointer" style={{ zIndex: 3 }} />
-            {/* End thumb */}
-            <input type="range" min={startHour + 1} max={MAX} value={endHour}
-                onChange={e => onChangeEnd(Number(e.target.value))}
-                className="absolute w-full h-full opacity-0 cursor-pointer" style={{ zIndex: 3 }} />
-            <div className="absolute w-5 h-5 rounded-full bg-white shadow-lg border-2 border-blue-500 pointer-events-none" style={{ left: `calc(${s}% - 10px)` }} />
-            <div className="absolute w-5 h-5 rounded-full bg-white shadow-lg border-2 border-blue-400 pointer-events-none" style={{ left: `calc(${e}% - 10px)` }} />
+        <div className="flex-1 flex flex-col items-center gap-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">{label}</p>
+
+            {/* Hour spinner */}
+            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2 w-full justify-between">
+                <button onClick={() => cycle(-1)}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-all cursor-pointer text-lg font-bold">
+                    ‹
+                </button>
+                <span className="text-2xl font-bold text-white tabular-nums w-10 text-center select-none">
+                    {String(displayHour).padStart(2, "0")}
+                </span>
+                <button onClick={() => cycle(1)}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-all cursor-pointer text-lg font-bold">
+                    ›
+                </button>
+            </div>
+
+            {/* AM / PM toggle */}
+            <div className="flex w-full rounded-xl overflow-hidden border border-white/10">
+                {([false, true] as const).map(pm => (
+                    <button key={String(pm)} onClick={() => toggleAmPm(pm)}
+                        className={`flex-1 py-1.5 text-xs font-bold uppercase tracking-widest cursor-pointer transition-all ${isPM === pm ? "bg-blue-600 text-white" : "bg-white/5 text-white/40 hover:bg-white/10"
+                            }`}>
+                        {pm ? "PM" : "AM"}
+                    </button>
+                ))}
+            </div>
         </div>
     );
 }
@@ -174,17 +205,18 @@ function Slide1({ state, set }: { state: OnboardingState; set: (p: Partial<Onboa
 
             {/* Time Window */}
             <div>
-                <div className="flex justify-between items-end mb-3">
-                    <p className="text-sm font-semibold text-white/80 uppercase tracking-wider">Preferred Hours</p>
-                    <p className="text-xs text-blue-400 font-semibold">{formatHour(state.startHour)} → {formatHour(state.endHour)}</p>
+                <p className="text-sm font-semibold text-white/80 uppercase tracking-wider mb-3">Preferred Hours</p>
+                <div className="flex gap-4 items-start">
+                    <TimePicker label="Start Time" hour24={state.startHour} onChange={v => set({ startHour: v })} />
+                    {/* divider arrow */}
+                    <div className="flex flex-col items-center justify-center pt-14 text-white/20 shrink-0">
+                        <span className="text-xl">→</span>
+                    </div>
+                    <TimePicker label="End Time" hour24={state.endHour} onChange={v => set({ endHour: v })} />
                 </div>
-                <DualSlider
-                    startHour={state.startHour} endHour={state.endHour}
-                    onChangeStart={v => set({ startHour: v })} onChangeEnd={v => set({ endHour: v })}
-                />
-                <div className="flex justify-between text-[11px] text-white/30 mt-2">
-                    <span>4 AM</span><span>Midnight</span>
-                </div>
+                <p className="text-xs text-blue-400/80 text-center mt-3 font-semibold">
+                    {formatHour(state.startHour)} → {formatHour(state.endHour)}
+                </p>
             </div>
         </div>
     );
@@ -205,7 +237,7 @@ function Slide2({ state, set }: { state: OnboardingState; set: (p: Partial<Onboa
                             className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all cursor-pointer ${state.dietaryPref === d.id
                                 ? "bg-blue-600/30 border-blue-500 shadow-lg shadow-blue-500/20 scale-[1.05]"
                                 : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20"}`}>
-                            <span className="text-2xl">{d.icon}</span>
+                            <span className={`${d.color} transition-colors`}>{d.icon}</span>
                             <span className="text-[10px] font-semibold text-white/70 text-center leading-tight">{d.label}</span>
                         </button>
                     ))}
@@ -223,7 +255,8 @@ function Slide2({ state, set }: { state: OnboardingState; set: (p: Partial<Onboa
                                 className={`flex items-center gap-2 px-4 py-2.5 rounded-full border text-sm font-semibold transition-all cursor-pointer ${active
                                     ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/30"
                                     : "bg-white/5 border-white/15 text-white/70 hover:border-white/30 hover:bg-white/10"}`}>
-                                <span>{t.icon}</span> {t.label}
+                                <span className={active ? "text-white" : "text-blue-400"}>{t.icon}</span>
+                                {t.label}
                                 {active && <Check className="w-3 h-3" />}
                             </button>
                         );
@@ -243,7 +276,10 @@ function Slide3({ state, set }: { state: OnboardingState; set: (p: Partial<Onboa
                         className={`flex items-center gap-4 p-4 rounded-2xl border transition-all cursor-pointer text-left group ${state.travelStyle === s.id
                             ? "bg-blue-600/25 border-blue-500 shadow-lg shadow-blue-500/20"
                             : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/25"}`}>
-                        <span className="text-3xl">{s.icon}</span>
+                        <div className={`shrink-0 w-12 h-12 rounded-xl flex items-center justify-center ${state.travelStyle === s.id ? "bg-blue-500/20" : "bg-white/5"
+                            }`}>
+                            <span className={s.color}>{s.icon}</span>
+                        </div>
                         <div>
                             <p className={`font-bold text-sm ${state.travelStyle === s.id ? "text-blue-300" : "text-white"}`}>{s.label}</p>
                             <p className="text-xs text-white/40 mt-0.5">{s.desc}</p>
@@ -451,7 +487,7 @@ export default function OnboardingPage() {
                 {/* Bottom hint */}
                 <p className="text-center text-xs text-white/25 mt-5">
                     Already have an account?{" "}
-                    <a href="/" className="text-blue-400 hover:text-blue-300 transition-colors cursor-pointer font-semibold">
+                    <a href="/?login=true" className="text-blue-400 hover:text-blue-300 transition-colors cursor-pointer font-semibold">
                         Login
                     </a>
                 </p>
