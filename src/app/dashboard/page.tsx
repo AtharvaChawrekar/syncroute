@@ -1,7 +1,24 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence, PanInfo } from "framer-motion";
+
+// ── Web Speech API types (not in default TS DOM lib) ──────────────────────────
+interface SpeechRecognitionInstance extends EventTarget {
+    continuous: boolean; interimResults: boolean; lang: string;
+    start(): void; stop(): void; abort(): void;
+    onstart: ((e: Event) => void) | null;
+    onend: ((e: Event) => void) | null;
+    onerror: ((e: Event & { error: string }) => void) | null;
+    onresult: ((e: Event & { resultIndex: number; results: SpeechRecognitionResultList }) => void) | null;
+}
+interface SpeechRecognitionCtor { new(): SpeechRecognitionInstance; }
+declare global {
+    interface Window { SpeechRecognition: SpeechRecognitionCtor; webkitSpeechRecognition: SpeechRecognitionCtor; }
+}
+type SREvent = Event & { resultIndex: number; results: SpeechRecognitionResultList };
+type SRErrEvent = Event & { error: string };
+
 import { Button } from "@/components/ui/button";
 import { ModeToggle } from "@/components/mode-toggle";
 import {
@@ -278,6 +295,67 @@ export default function Dashboard() {
 
     // ─── UI STATE ──────────────────────────────────────────────────
     const [isListening, setIsListening] = useState(false);
+    const [interimTranscript, setInterimTranscript] = useState("");
+    const [voiceError, setVoiceError] = useState<string | null>(null);
+    const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+    const voiceRetried = useRef(false); // prevent infinite retry
+
+    const startListening = useCallback((isRetry = false) => {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) { alert("Your browser doesn't support voice input. Try Chrome."); return; }
+        setVoiceError(null);
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+        recognition.onstart = () => { setIsListening(true); voiceRetried.current = false; };
+        recognition.onend = () => { setIsListening(false); setInterimTranscript(""); recognitionRef.current = null; };
+        recognition.onerror = (e: SRErrEvent) => {
+            recognitionRef.current = null;
+            setIsListening(false);
+            setInterimTranscript("");
+            if (e.error === "not-allowed") {
+                // "not-allowed" fires when permission dialog was still pending on first click.
+                // Now that the user has clicked Allow, retry once automatically.
+                if (!isRetry && !voiceRetried.current) {
+                    voiceRetried.current = true;
+                    setTimeout(() => startListening(true), 400);
+                } else {
+                    setVoiceError("Mic access denied. Please allow microphone in your browser settings.");
+                }
+                return;
+            }
+            if (e.error === "no-speech") return; // silent timeout — not an error
+            setVoiceError("Voice error: " + e.error + ". Try again.");
+        };
+        recognition.onresult = (e: SREvent) => {
+            let finalText = "";
+            let interim = "";
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                const t = e.results[i][0].transcript;
+                if (e.results[i].isFinal) finalText += t;
+                else interim += t;
+            }
+            if (finalText) {
+                setMessageInput(prev => {
+                    const trimmed = prev.trimEnd();
+                    return trimmed ? trimmed + " " + finalText.trim() : finalText.trim();
+                });
+            }
+            setInterimTranscript(interim);
+        };
+        recognitionRef.current = recognition;
+        recognition.start();
+    }, []);
+
+    const stopListening = useCallback(() => {
+        recognitionRef.current?.stop();
+        recognitionRef.current = null;
+        setIsListening(false);
+        setInterimTranscript("");
+    }, []);
+
+    const toggleListening = () => isListening ? stopListening() : startListening();
     const [messageInput, setMessageInput] = useState("");
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [itineraryOpen, setItineraryOpen] = useState(true);
@@ -730,42 +808,75 @@ export default function Dashboard() {
                             )}
                         </AnimatePresence>
 
-                        {/* Listening waveform */}
+                        {/* Listening waveform / voice error */}
                         <AnimatePresence>
-                            {isListening && (
+                            {voiceError && (
                                 <motion.div
+                                    key="voice-error"
                                     initial={{ opacity: 0, height: 0 }}
                                     animate={{ opacity: 1, height: "auto" }}
                                     exit={{ opacity: 0, height: 0 }}
-                                    className="flex items-center justify-center gap-3 py-3 rounded-2xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20"
+                                    className="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/25 overflow-hidden"
                                 >
-                                    <div className="flex items-center gap-0.5">
+                                    <span className="flex-1 text-sm text-red-700 dark:text-red-300">{voiceError}</span>
+                                    <button onClick={() => setVoiceError(null)} className="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-500/20 cursor-pointer shrink-0">
+                                        <X className="w-3.5 h-3.5 text-red-500" />
+                                    </button>
+                                </motion.div>
+                            )}
+                            {isListening && (
+                                <motion.div
+                                    key="voice-wave"
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: "auto" }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/25 overflow-hidden"
+                                >
+                                    {/* Animated bars */}
+                                    <div className="flex items-center gap-0.5 shrink-0">
                                         {[14, 22, 18, 28, 16, 24, 12, 20].map((h, i) => (
-                                            <motion.div key={i} className="w-1 bg-blue-500 rounded-full"
+                                            <motion.div key={i} className="w-1 bg-red-500 rounded-full"
                                                 animate={{ height: [h, h * 1.8, h] }}
-                                                transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.07, ease: "easeInOut" }}
+                                                transition={{ duration: 0.5, repeat: Infinity, delay: i * 0.06, ease: "easeInOut" }}
                                                 style={{ height: h }}
                                             />
                                         ))}
                                     </div>
-                                    <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">Listening…</span>
-                                    <button onClick={() => setIsListening(false)} className="p-1 rounded-full hover:bg-blue-100 dark:hover:bg-blue-500/20 cursor-pointer">
-                                        <X className="w-4 h-4 text-blue-500" />
+                                    {/* Live transcript or placeholder */}
+                                    <span className="flex-1 text-sm font-medium text-red-700 dark:text-red-300 truncate min-w-0">
+                                        {interimTranscript
+                                            ? <span className="italic opacity-80">{interimTranscript}</span>
+                                            : <span className="opacity-60">Listening… speak now</span>
+                                        }
+                                    </span>
+                                    <button onClick={stopListening} className="p-1.5 rounded-full hover:bg-red-100 dark:hover:bg-red-500/20 cursor-pointer shrink-0">
+                                        <X className="w-4 h-4 text-red-500" />
                                     </button>
                                 </motion.div>
                             )}
                         </AnimatePresence>
 
                         <div className="flex items-center gap-2">
-                            <motion.button
-                                whileTap={{ scale: 0.9 }}
-                                onClick={() => setIsListening(!isListening)}
-                                className={`p-3.5 rounded-2xl transition-all duration-300 cursor-pointer shrink-0 ${isListening
-                                    ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/30"
-                                    : "bg-gradient-to-br from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 shadow-lg shadow-blue-500/30"}`}
-                            >
-                                <Mic className="w-5 h-5 text-white" />
-                            </motion.button>
+                            <div className="relative shrink-0">
+                                {/* Pulsing ring when active */}
+                                {isListening && (
+                                    <motion.span
+                                        className="absolute inset-0 rounded-2xl bg-red-500"
+                                        animate={{ scale: [1, 1.45], opacity: [0.45, 0] }}
+                                        transition={{ duration: 1.1, repeat: Infinity, ease: "easeOut" }}
+                                    />
+                                )}
+                                <motion.button
+                                    whileTap={{ scale: 0.88 }}
+                                    onClick={toggleListening}
+                                    className={`relative z-10 p-3.5 rounded-2xl transition-all duration-300 cursor-pointer ${isListening
+                                        ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/40"
+                                        : "bg-gradient-to-br from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 shadow-lg shadow-blue-500/30"
+                                        }`}
+                                >
+                                    <Mic className={`w-5 h-5 text-white ${isListening ? "animate-pulse" : ""}`} />
+                                </motion.button>
+                            </div>
                             <div className="flex-1 relative">
                                 {/* @Mention suggestion popup */}
                                 <AnimatePresence>
