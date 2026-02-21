@@ -11,7 +11,7 @@ import {
     X, MoreVertical, Pin, Share2, Trash2, Type, UserPlus,
     CornerUpLeft, ChevronRight, Check, CloudRain, Clock, Download, Lock, Bell
 } from "lucide-react";
-import { useChatMessages, useTrips, useCurrentUser, useInvitations, type Trip, type Message } from "@/hooks/useSyncRoute";
+import { useChatMessages, useTrips, useCurrentUser, useInvitations, useTyping, type Trip, type Message } from "@/hooks/useSyncRoute";
 
 /* ──────────────────────────────────────────────────────────────── */
 /*  TYPES                                                           */
@@ -269,6 +269,12 @@ export default function Dashboard() {
         isWorkspace,
     );
 
+    // ─── TYPING INDICATOR ─────────────────────────────────────────
+    const { typingUsers, broadcastTyping, stopTyping } = useTyping(
+        activeTrip || null,
+        profile?.username ?? null,
+    );
+
 
     // ─── UI STATE ──────────────────────────────────────────────────
     const [isListening, setIsListening] = useState(false);
@@ -332,6 +338,7 @@ export default function Dashboard() {
     // ─── HANDLERS ──────────────────────────────────────────────────
     const handleSend = () => {
         if (!messageInput.trim()) return;
+        stopTyping(); // immediately clear typing indicator for others
         sendMessage(messageInput.trim(), replyTo ? { username: replyTo.username, text: replyTo.text } : null);
         setMessageInput("");
         setReplyTo(null);
@@ -341,6 +348,7 @@ export default function Dashboard() {
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = e.target.value;
         setMessageInput(val);
+        if (val.trim()) broadcastTyping(); // broadcast typing to others
         // Detect '@' trigger: find last '@' and extract query after it
         const isWorkspace = trips.find(t => t.id === activeTrip)?.is_workspace ?? false;
         const atIdx = val.lastIndexOf("@");
@@ -649,6 +657,55 @@ export default function Dashboard() {
                         {/* Sentinel div — scrolled into view on new messages */}
                         <div ref={messagesEndRef} />
                     </div>
+
+                    {/* ── Typing Indicator ── */}
+                    <AnimatePresence>
+                        {typingUsers.length > 0 && (
+                            <motion.div
+                                key="typing-indicator"
+                                initial={{ opacity: 0, y: 6, height: 0 }}
+                                animate={{ opacity: 1, y: 0, height: "auto" }}
+                                exit={{ opacity: 0, y: 6, height: 0 }}
+                                transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                                className="px-5 pb-1 overflow-hidden"
+                            >
+                                <div className="flex items-center gap-2">
+                                    {/* Animated avatar dots */}
+                                    <div className="flex -space-x-1.5">
+                                        {typingUsers.slice(0, 3).map((u) => (
+                                            <div
+                                                key={u}
+                                                className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold ring-2 ring-white dark:ring-[#141414]"
+                                                style={{ backgroundColor: `hsl(${[...u].reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 65%, 50%)` }}
+                                            >
+                                                {u.charAt(0).toUpperCase()}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {/* Label */}
+                                    <p className="text-xs text-gray-400 dark:text-gray-500 font-medium">
+                                        {typingUsers.length === 1
+                                            ? <><span className="text-gray-600 dark:text-gray-300 font-semibold">{typingUsers[0]}</span> is typing</>
+                                            : typingUsers.length === 2
+                                                ? <><span className="text-gray-600 dark:text-gray-300 font-semibold">{typingUsers[0]}</span> and <span className="text-gray-600 dark:text-gray-300 font-semibold">{typingUsers[1]}</span> are typing</>
+                                                : <><span className="text-gray-600 dark:text-gray-300 font-semibold">{typingUsers[0]}</span> and {typingUsers.length - 1} others are typing</>
+                                        }
+                                    </p>
+                                    {/* Bouncing dots */}
+                                    <span className="flex items-center gap-0.5 pb-0.5">
+                                        {[0, 1, 2].map(i => (
+                                            <motion.span
+                                                key={i}
+                                                className="w-1 h-1 rounded-full bg-gray-400 dark:bg-gray-500 inline-block"
+                                                animate={{ y: [0, -4, 0] }}
+                                                transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }}
+                                            />
+                                        ))}
+                                    </span>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
 
                     {/* Input Area */}
                     <div className="px-4 pb-4 pt-2 bg-white dark:bg-[#141414] border-t border-gray-200 dark:border-white/5 space-y-2">

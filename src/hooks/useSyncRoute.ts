@@ -624,3 +624,90 @@ export function useInvitations(userId: string | null) {
 
     return { invitations, loading, sendInvite, acceptInvitation, declineInvitation, refetchInvitations: fetchInvitations };
 }
+
+// ─── HOOK: useTyping ──────────────────────────────────────────────────────────
+// Uses Supabase Realtime Broadcast (no DB writes) to share typing presence.
+
+export function useTyping(tripId: string | null, currentUsername: string | null) {
+    // List of OTHER users currently typing (their usernames)
+    const [typingUsers, setTypingUsers] = useState<string[]>([]);
+    // Ref to the broadcast channel so we can send events
+    const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+    // Timer ref to auto-clear our own typing status
+    const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Per-user expiry timers so remote users auto-clear if they disconnect
+    const userTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+    useEffect(() => {
+        if (!tripId) return;
+
+        const channel = supabase
+            .channel(`typing:${tripId}`, { config: { broadcast: { self: false } } })
+            .on("broadcast", { event: "typing" }, ({ payload }: { payload: { username: string; isTyping: boolean } }) => {
+                const { username, isTyping } = payload;
+
+                // Clear any existing auto-expire timer for this user
+                if (userTimers.current[username]) {
+                    clearTimeout(userTimers.current[username]);
+                    delete userTimers.current[username];
+                }
+
+                if (isTyping) {
+                    setTypingUsers(prev => prev.includes(username) ? prev : [...prev, username]);
+                    // Auto-remove after 3s in case the "stopped" event is missed
+                    userTimers.current[username] = setTimeout(() => {
+                        setTypingUsers(prev => prev.filter(u => u !== username));
+                        delete userTimers.current[username];
+                    }, 3000);
+                } else {
+                    setTypingUsers(prev => prev.filter(u => u !== username));
+                }
+            })
+            .subscribe();
+
+        channelRef.current = channel;
+
+        return () => {
+            supabase.removeChannel(channel);
+            channelRef.current = null;
+            // Clear all expiry timers
+            Object.values(userTimers.current).forEach(clearTimeout);
+            userTimers.current = {};
+        };
+    }, [tripId]);
+
+    // Called by the input's onChange — debounced stop after 2.5s of no keystrokes
+    const broadcastTyping = useCallback(() => {
+        if (!channelRef.current || !currentUsername) return;
+
+        // Send "started typing"
+        channelRef.current.send({
+            type: "broadcast",
+            event: "typing",
+            payload: { username: currentUsername, isTyping: true },
+        });
+
+        // Reset the stop timer
+        if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+        stopTimerRef.current = setTimeout(() => {
+            channelRef.current?.send({
+                type: "broadcast",
+                event: "typing",
+                payload: { username: currentUsername, isTyping: false },
+            });
+        }, 2500);
+    }, [currentUsername]);
+
+    // Call this when message is sent to immediately clear typing indicator
+    const stopTyping = useCallback(() => {
+        if (!channelRef.current || !currentUsername) return;
+        if (stopTimerRef.current) { clearTimeout(stopTimerRef.current); stopTimerRef.current = null; }
+        channelRef.current.send({
+            type: "broadcast",
+            event: "typing",
+            payload: { username: currentUsername, isTyping: false },
+        });
+    }, [currentUsername]);
+
+    return { typingUsers, broadcastTyping, stopTyping };
+}
