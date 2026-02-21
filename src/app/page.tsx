@@ -1,17 +1,8 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Plane, PlayCircle, Star, MapPin, Calendar, DollarSign, Facebook, Twitter, Instagram } from "lucide-react";
-import { ModeToggle } from "@/components/mode-toggle";
+import { AuthButtons } from "@/components/auth-buttons";
 
 export default function Home() {
   return (
@@ -29,62 +20,7 @@ export default function Home() {
           <a href="#contact" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Contact</a>
         </div>
 
-        <div className="flex items-center gap-3">
-          <ModeToggle />
-
-          {/* Login Dialog */}
-          <Dialog>
-            <DialogTrigger asChild>
-              <button className="text-sm font-semibold text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer px-2">Login</button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md rounded-3xl p-8 bg-white/95 dark:bg-[#1A1A1A]/95 backdrop-blur-lg border-none shadow-2xl">
-              <DialogHeader>
-                <DialogTitle className="font-heading text-3xl mb-2 text-center text-gray-900 dark:text-white">Welcome Back</DialogTitle>
-                <DialogDescription className="text-center text-gray-500 dark:text-gray-400">
-                  Log in to continue planning your next adventure.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-6">
-                <Input className="rounded-xl h-12 bg-gray-50/50 dark:bg-white/5 border-gray-200 dark:border-white/10 px-4 text-gray-900 dark:text-white" placeholder="Email" defaultValue="user@syncroute.demo" />
-                <Input className="rounded-xl h-12 bg-gray-50/50 dark:bg-white/5 border-gray-200 dark:border-white/10 px-4 text-gray-900 dark:text-white" type="password" placeholder="Password" defaultValue="password123" />
-                <div className="flex justify-end">
-                  <button className="text-xs text-blue-500 hover:text-blue-400 font-medium cursor-pointer transition-colors">Forgot Password?</button>
-                </div>
-                <div className="pt-2">
-                  <a href="/dashboard">
-                    <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-12 text-md font-semibold font-sans shadow-lg shadow-blue-500/25 transition-transform duration-300 hover:scale-[1.02] active:scale-[0.98] cursor-pointer">Login</Button>
-                  </a>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          {/* Sign Up Dialog */}
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button className="bg-blue-600 hover:bg-blue-700 text-white rounded-full px-6 font-semibold shadow-lg shadow-blue-500/25 transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer">Sign Up</Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md rounded-3xl p-8 bg-white/95 dark:bg-[#1A1A1A]/95 backdrop-blur-lg border-none shadow-2xl">
-              <DialogHeader>
-                <DialogTitle className="font-heading text-3xl mb-2 text-center text-gray-900 dark:text-white">Join SyncRoute</DialogTitle>
-                <DialogDescription className="text-center text-gray-500 dark:text-gray-400">
-                  Create your account and start planning trips with AI.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-6">
-                <Input className="rounded-xl h-12 bg-gray-50/50 dark:bg-white/5 border-gray-200 dark:border-white/10 px-4 text-gray-900 dark:text-white" placeholder="Username" />
-                <Input className="rounded-xl h-12 bg-gray-50/50 dark:bg-white/5 border-gray-200 dark:border-white/10 px-4 text-gray-900 dark:text-white" placeholder="Email" />
-                <Input className="rounded-xl h-12 bg-gray-50/50 dark:bg-white/5 border-gray-200 dark:border-white/10 px-4 text-gray-900 dark:text-white" type="password" placeholder="Password" />
-                <Input className="rounded-xl h-12 bg-gray-50/50 dark:bg-white/5 border-gray-200 dark:border-white/10 px-4 text-gray-900 dark:text-white" type="password" placeholder="Confirm Password" />
-                <div className="pt-2">
-                  <a href="/dashboard">
-                    <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-12 text-md font-semibold font-sans shadow-lg shadow-blue-500/25 transition-transform duration-300 hover:scale-[1.02] active:scale-[0.98] cursor-pointer">Create Account</Button>
-                  </a>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
+        <AuthButtons />
       </nav>
 
       <main className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-12 py-8 space-y-32 mb-32">

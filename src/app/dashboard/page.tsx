@@ -9,7 +9,7 @@ import {
     Settings, Plane, GripVertical, MessageSquare, Users,
     Edit3, Coffee, Mountain, Ship, Camera, UtensilsCrossed,
     X, MoreVertical, Pin, Share2, Trash2, Type, UserPlus,
-    CornerUpLeft, ChevronRight, Check, CloudRain, Clock
+    CornerUpLeft, ChevronRight, Check, CloudRain, Clock, Download
 } from "lucide-react";
 import { useChatMessages, useTrips, useProfile, type Trip, type Message } from "@/hooks/useSyncRoute";
 
@@ -220,6 +220,21 @@ export default function Dashboard() {
     const [itinerary, setItinerary] = useState<ItineraryDay[]>(INITIAL_ITINERARY);
     const [activeDisruption, setActiveDisruption] = useState<string | null>(null);
 
+    // @mention autocomplete
+    const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+
+    const MENTION_SUGGESTIONS = [
+        { tag: "@Safar", keyword: "Safar", desc: "Your AI trip planner" },
+        { tag: "@update", keyword: "update", desc: "Rebuild the itinerary" },
+        { tag: "@budget", keyword: "budget", desc: "Optimize trip costs" },
+        { tag: "@delay", keyword: "delay", desc: "Handle a disruption" },
+        { tag: "@optimize", keyword: "optimize", desc: "Fine-tune the plan" },
+    ];
+
+    const filteredMentions = mentionQuery !== null
+        ? MENTION_SUGGESTIONS.filter(s => s.keyword.toLowerCase().startsWith(mentionQuery.toLowerCase()))
+        : [];
+
     // ─── MODAL STATE ───────────────────────────────────────────────
     const [modal, setModal] = useState<
         "createGroup" | "profile" | "addCollaborator" | "groupSettings" | null
@@ -236,6 +251,31 @@ export default function Dashboard() {
         sendMessage(messageInput.trim(), replyTo ? { username: replyTo.username, text: replyTo.text } : null);
         setMessageInput("");
         setReplyTo(null);
+        setMentionQuery(null);
+    };
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setMessageInput(val);
+        // Detect '@' trigger: find last '@' and extract query after it
+        const atIdx = val.lastIndexOf("@");
+        if (atIdx !== -1 && (atIdx === 0 || val[atIdx - 1] === " ")) {
+            const query = val.slice(atIdx + 1);
+            // Only show if no space after @
+            if (!query.includes(" ")) {
+                setMentionQuery(query);
+                return;
+            }
+        }
+        setMentionQuery(null);
+    };
+
+    const insertMention = (tag: string) => {
+        // Replace the partial @query with the full tag
+        const atIdx = messageInput.lastIndexOf("@");
+        const before = atIdx !== -1 ? messageInput.slice(0, atIdx) : messageInput;
+        setMessageInput(before + tag + " ");
+        setMentionQuery(null);
     };
 
     const handleCreateGroup = () => {
@@ -349,8 +389,8 @@ export default function Dashboard() {
                                         {/* 3-dot context menu */}
                                         <div className="relative" onClick={e => e.stopPropagation()}>
                                             <button onClick={() => setOpenDropdown(openDropdown === g.id ? null : g.id)}
-                                                className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-white/10 transition-all cursor-pointer">
-                                                <MoreVertical className="w-4 h-4 text-gray-400" />
+                                                className="p-1.5 rounded-lg opacity-40 hover:opacity-100 hover:bg-gray-200 dark:hover:bg-white/10 transition-all cursor-pointer">
+                                                <MoreVertical className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                                             </button>
                                             <AnimatePresence>
                                                 {openDropdown === g.id && (
@@ -489,13 +529,44 @@ export default function Dashboard() {
                             >
                                 <Mic className="w-5 h-5 text-white" />
                             </motion.button>
-                            <input
-                                value={messageInput}
-                                onChange={e => setMessageInput(e.target.value)}
-                                onKeyDown={e => e.key === "Enter" && handleSend()}
-                                placeholder='Type a message or say "@Safar plan my day…"'
-                                className="flex-1 h-12 px-5 rounded-2xl bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500/30 transition-all"
-                            />
+                            <div className="flex-1 relative">
+                                {/* @Mention suggestion popup */}
+                                <AnimatePresence>
+                                    {mentionQuery !== null && filteredMentions.length > 0 && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                                            transition={{ type: "spring", stiffness: 380, damping: 28 }}
+                                            className="absolute bottom-full mb-2 left-0 right-0 z-30 bg-white/95 dark:bg-[#1E1E1E]/98 backdrop-blur-xl border border-gray-200 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+                                        >
+                                            <p className="px-4 pt-3 pb-1.5 text-[10px] font-bold uppercase tracking-widest text-gray-400">Mentions</p>
+                                            {filteredMentions.map((s, i) => (
+                                                <button
+                                                    key={s.tag}
+                                                    onClick={() => insertMention(s.tag)}
+                                                    className={`w-full flex items-center justify-between gap-4 px-4 py-2.5 cursor-pointer transition-colors hover:bg-blue-50 dark:hover:bg-blue-500/10 ${i < filteredMentions.length - 1 ? "border-b border-gray-100 dark:border-white/5" : ""
+                                                        }`}
+                                                >
+                                                    <span className="font-semibold text-sm text-blue-600 dark:text-blue-400">{s.tag}</span>
+                                                    <span className="text-xs text-gray-400 dark:text-gray-500 truncate">{s.desc}</span>
+                                                </button>
+                                            ))}
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+
+                                <input
+                                    value={messageInput}
+                                    onChange={handleInputChange}
+                                    onKeyDown={e => {
+                                        if (e.key === "Escape") { setMentionQuery(null); return; }
+                                        if (e.key === "Enter" && mentionQuery === null) handleSend();
+                                    }}
+                                    placeholder='Type a message or say "@Safar plan my day…"'
+                                    className="w-full h-12 px-5 rounded-2xl bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500/30 transition-all"
+                                />
+                            </div>
                             <motion.button
                                 whileTap={{ scale: 0.9 }}
                                 onClick={handleSend}
@@ -521,7 +592,39 @@ export default function Dashboard() {
                             <div className="p-4 border-b border-gray-200 dark:border-white/5 shrink-0">
                                 <div className="flex items-center justify-between mb-1">
                                     <h3 className="font-heading text-xl text-gray-800 dark:text-white tracking-wide">ITINERARY</h3>
-                                    <span className="text-[10px] font-semibold text-blue-500 bg-blue-50 dark:bg-blue-500/10 px-2.5 py-1 rounded-full border border-blue-200 dark:border-blue-500/20 animate-pulse">● Live</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-semibold text-blue-500 bg-blue-50 dark:bg-blue-500/10 px-2.5 py-1 rounded-full border border-blue-200 dark:border-blue-500/20 animate-pulse">● Live</span>
+                                        {/* Itinerary 3-dot menu */}
+                                        <div className="relative" onClick={e => e.stopPropagation()}>
+                                            <button
+                                                onClick={() => setOpenDropdown(openDropdown === "itinerary" ? null : "itinerary")}
+                                                className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 transition-colors cursor-pointer opacity-60 hover:opacity-100"
+                                            >
+                                                <MoreVertical className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                                            </button>
+                                            <AnimatePresence>
+                                                {openDropdown === "itinerary" && (
+                                                    <motion.div
+                                                        initial={{ opacity: 0, scale: 0.9, y: -5 }}
+                                                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                        exit={{ opacity: 0, scale: 0.9, y: -5 }}
+                                                        transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                                                        className="absolute right-0 top-9 z-30 w-48 bg-white/95 dark:bg-[#1E1E1E]/95 backdrop-blur-xl border border-gray-200 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+                                                    >
+                                                        {[
+                                                            { icon: <Download className="w-3.5 h-3.5" />, label: "Download PDF", action: () => { /* TODO: PDF logic */ } },
+                                                        ].map(item => (
+                                                            <button key={item.label}
+                                                                onClick={() => { item.action?.(); setOpenDropdown(null); }}
+                                                                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/5 cursor-pointer transition-colors">
+                                                                {item.icon}{item.label}
+                                                            </button>
+                                                        ))}
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
+                                        </div>
+                                    </div>
                                 </div>
                                 <p className="text-xs text-gray-400 mb-3">Goa Trip · 4 Days · ₹12,800/person</p>
 
