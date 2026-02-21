@@ -311,9 +311,9 @@ export function useChatMessages(tripId: string | null, currentUser: Profile | nu
             setLoading(false);
         })();
 
-        // Realtime subscription
+        // Realtime subscription — fires for ALL users' messages
         const channel = supabase
-            .channel(`messages:${tripId}`)
+            .channel(`messages:${tripId}:${Date.now()}`) // unique channel name avoids stale channel reuse
             .on("postgres_changes", {
                 event: "INSERT",
                 schema: "public",
@@ -321,21 +321,46 @@ export function useChatMessages(tripId: string | null, currentUser: Profile | nu
                 filter: `trip_id=eq.${tripId}`,
             }, async (payload) => {
                 const m = payload.new as { id: string; trip_id: string; sender_id: string | null; is_ai: boolean; content: string; created_at: string };
-                // Avoid duplicate (we optimistically added yours already)
+
+                // Skip if this real DB id is already tracked (e.g. own message already replaced temp id)
                 if (messagesRef.current.some(ex => ex.id === m.id)) return;
-                // Fetch sender username
-                let username = "Unknown";
-                if (m.sender_id) {
+
+                // For own messages: if there's a temp optimistic message with matching content + sender, replace it
+                // instead of adding a duplicate
+                const selfId = currentUser?.id;
+                if (selfId && m.sender_id === selfId) {
+                    setMessages(prev => {
+                        const tempIdx = prev.findIndex(ex => ex.id.startsWith("temp-") && ex.user_id === selfId && ex.text === m.content);
+                        if (tempIdx !== -1) {
+                            // Replace the temp bubble with the real one
+                            const updated = [...prev];
+                            updated[tempIdx] = { ...updated[tempIdx], id: m.id };
+                            return updated;
+                        }
+                        // No temp found — just append (edge case)
+                        return [...prev, toClientMsg({ ...m, users: { username: currentUser?.username ?? "You" } }, selfId)];
+                    });
+                    return;
+                }
+
+                // Message from another user or AI — fetch their username and append
+                let username = m.is_ai ? "Safar AI" : "Unknown";
+                if (m.sender_id && !m.is_ai) {
                     const { data: u } = await supabase.from("users").select("username").eq("id", m.sender_id).single();
                     if (u) username = u.username;
                 }
                 setMessages(prev => [...prev, toClientMsg({ ...m, users: { username } }, currentUser?.id)]);
             })
-            .subscribe();
+            .subscribe((status) => {
+                if (status === "CHANNEL_ERROR") {
+                    console.error("Realtime channel error on messages:", tripId);
+                }
+            });
 
         return () => { supabase.removeChannel(channel); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tripId]);
+
 
     // @Safar AI helper — streams tokens from /api/safar (SSE)
     const callSafar = useCallback(async (userText: string) => {

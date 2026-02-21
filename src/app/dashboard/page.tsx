@@ -278,6 +278,12 @@ export default function Dashboard() {
     // Swipe-to-Reply
     const [replyTo, setReplyTo] = useState<Message | null>(null);
 
+    // Auto-scroll to bottom on new messages
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
+
     // Dropdown menu
     const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
@@ -640,6 +646,8 @@ export default function Dashboard() {
                         {messages.map((msg) => (
                             <SwipeableMessage key={msg.id} msg={msg} onReply={setReplyTo} />
                         ))}
+                        {/* Sentinel div — scrolled into view on new messages */}
+                        <div ref={messagesEndRef} />
                     </div>
 
                     {/* Input Area */}
