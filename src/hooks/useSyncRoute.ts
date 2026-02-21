@@ -547,8 +547,30 @@ export function useInvitations(userId: string | null) {
 
     // Send invite by username (case-insensitive)
     const sendInvite = useCallback(async (tripId: string, inviterId: string, username: string): Promise<"ok" | "not_found" | "already" | "error"> => {
-        const { data: targetUser } = await supabase.from("users").select("id").ilike("username", username).limit(1).maybeSingle();
+        // 1) Look up the invitee by username
+        const { data: targetUser, error: lookupErr } = await supabase
+            .from("users")
+            .select("id")
+            .ilike("username", username.trim())
+            .limit(1)
+            .maybeSingle();
+
+        if (lookupErr) { console.error("sendInvite:lookup", lookupErr); return "error"; }
         if (!targetUser) return "not_found";
+
+        // 2) Prevent self-invite
+        if (targetUser.id === inviterId) return "already";
+
+        // 3) Check if already a member of this trip
+        const { data: existingMember } = await supabase
+            .from("trip_members")
+            .select("user_id")
+            .eq("trip_id", tripId)
+            .eq("user_id", targetUser.id)
+            .maybeSingle();
+        if (existingMember) return "already";
+
+        // 4) Insert the invitation
         const { error } = await supabase.from("invitations").insert({
             trip_id: tripId,
             inviter_id: inviterId,
@@ -556,7 +578,8 @@ export function useInvitations(userId: string | null) {
             status: "pending",
         });
         if (error) {
-            if (error.code === "23505") return "already"; // unique constraint
+            console.error("sendInvite:insert", error);
+            if (error.code === "23505") return "already"; // unique constraint violation
             return "error";
         }
         return "ok";

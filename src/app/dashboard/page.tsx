@@ -366,13 +366,16 @@ export default function Dashboard() {
     };
 
     const [inviteStatus, setInviteStatus] = useState<"idle" | "sending" | "ok" | "not_found" | "already" | "error">("idle");
+    const [lastInvitedUser, setLastInvitedUser] = useState("");
     const handleAddCollaborator = async () => {
         if (!collaboratorName.trim() || !user || !activeTrip) return;
         setInviteStatus("sending");
-        const result = await sendInvite(activeTrip, user.id, collaboratorName.trim());
+        const usernameToInvite = collaboratorName.trim();
+        const result = await sendInvite(activeTrip, user.id, usernameToInvite);
         setInviteStatus(result);
         if (result === "ok") {
-            setTimeout(() => { setCollaboratorName(""); setModal(null); setInviteStatus("idle"); }, 1200);
+            setLastInvitedUser(usernameToInvite);
+            setTimeout(() => { setCollaboratorName(""); setModal(null); setInviteStatus("idle"); setLastInvitedUser(""); }, 2500);
         }
     };
 
@@ -1011,36 +1014,64 @@ export default function Dashboard() {
             </Modal>
 
             {/* Add Collaborator */}
-            <Modal open={modal === "addCollaborator"} onClose={() => setModal(null)}>
-                <div className="flex items-center gap-3 mb-1">
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center">
-                        <UserPlus className="w-5 h-5 text-blue-500" />
-                    </div>
-                    <div>
-                        <h2 className="font-heading text-2xl text-gray-900 dark:text-white">Invite Someone</h2>
-                        <p className="text-xs text-gray-400">This trip is currently private</p>
-                    </div>
-                </div>
-                <p className="text-sm text-gray-500 mb-5 mt-2">Enter their SyncRoute username to upgrade this trip to a shared space.</p>
-                <div className="space-y-3">
-                    <div className="relative">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">@</span>
-                        <input
-                            value={collaboratorName}
-                            onChange={e => setCollaboratorName(e.target.value)}
-                            onKeyDown={e => e.key === "Enter" && handleAddCollaborator()}
-                            placeholder="username"
-                            className="w-full h-11 pl-8 pr-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500/30" />
-                    </div>
-                    {inviteStatus === "not_found" && <p className="text-xs text-red-400 text-center">User not found. Check the username and try again.</p>}
-                    {inviteStatus === "already" && <p className="text-xs text-amber-400 text-center">Invite already sent to this user.</p>}
-                    {inviteStatus === "ok" && <p className="text-xs text-green-400 text-center">Invite sent! ✓</p>}
-                    <button onClick={handleAddCollaborator} disabled={inviteStatus === "sending"}
-                        className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold text-sm cursor-pointer transition-all hover:scale-[1.02] shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">
-                        {inviteStatus === "sending" ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                        {inviteStatus === "sending" ? "Sending…" : "Send Invite"}
-                    </button>
-                </div>
+            <Modal open={modal === "addCollaborator"} onClose={() => { setModal(null); setInviteStatus("idle"); setCollaboratorName(""); }}>
+                {inviteStatus === "ok" ? (
+                    /* ── Success state ── */
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.92 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="flex flex-col items-center text-center py-4 gap-4"
+                    >
+                        <div className="w-16 h-16 rounded-full bg-green-50 dark:bg-green-500/10 flex items-center justify-center ring-4 ring-green-100 dark:ring-green-500/20">
+                            <Check className="w-8 h-8 text-green-500" />
+                        </div>
+                        <div>
+                            <h2 className="font-heading text-2xl text-gray-900 dark:text-white mb-1">Invite Sent!</h2>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                <span className="font-semibold text-blue-500">@{lastInvitedUser}</span> will receive your trip invitation.
+                            </p>
+                            <p className="text-xs text-gray-400 mt-2">They can accept it from their notifications.</p>
+                        </div>
+                        <button onClick={() => { setModal(null); setInviteStatus("idle"); setCollaboratorName(""); setLastInvitedUser(""); }}
+                            className="mt-2 w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm cursor-pointer transition-all hover:scale-[1.02] shadow-lg shadow-blue-500/25">
+                            Done
+                        </button>
+                    </motion.div>
+                ) : (
+                    /* ── Default invite form ── */
+                    <>
+                        <div className="flex items-center gap-3 mb-1">
+                            <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center">
+                                <UserPlus className="w-5 h-5 text-blue-500" />
+                            </div>
+                            <div>
+                                <h2 className="font-heading text-2xl text-gray-900 dark:text-white">Invite Someone</h2>
+                                <p className="text-xs text-gray-400">This trip is currently private</p>
+                            </div>
+                        </div>
+                        <p className="text-sm text-gray-500 mb-5 mt-2">Enter their SyncRoute username to upgrade this trip to a shared space.</p>
+                        <div className="space-y-3">
+                            <div className="relative">
+                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">@</span>
+                                <input
+                                    value={collaboratorName}
+                                    onChange={e => { setCollaboratorName(e.target.value); setInviteStatus("idle"); }}
+                                    onKeyDown={e => e.key === "Enter" && handleAddCollaborator()}
+                                    placeholder="username"
+                                    autoFocus
+                                    className="w-full h-11 pl-8 pr-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500/30" />
+                            </div>
+                            {inviteStatus === "not_found" && <p className="text-xs text-red-400 text-center flex items-center justify-center gap-1"><X className="w-3 h-3" /> User not found. Check the username and try again.</p>}
+                            {inviteStatus === "already" && <p className="text-xs text-amber-400 text-center flex items-center justify-center gap-1"><Bell className="w-3 h-3" /> Already a member or invite already sent.</p>}
+                            {inviteStatus === "error" && <p className="text-xs text-red-400 text-center">Something went wrong. Please try again.</p>}
+                            <button onClick={handleAddCollaborator} disabled={inviteStatus === "sending" || !collaboratorName.trim()}
+                                className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold text-sm cursor-pointer transition-all hover:scale-[1.02] shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">
+                                {inviteStatus === "sending" ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                                {inviteStatus === "sending" ? "Sending…" : "Send Invite"}
+                            </button>
+                        </div>
+                    </>
+                )}
             </Modal>
 
             {/* ── Invitations ── */}
