@@ -272,7 +272,7 @@ export default function Home() {
       </main>
 
       {/* FOOTER SECTION */}
-      <footer className="relative mt-20 pt-24 pb-12 overflow-hidden text-white px-8 md:px-16" id="contact" style={{ background: 'linear-gradient(to top, #000 30%, rgba(0,0,0,0.85) 60%, rgba(10,30,60,0.5)), url(https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1920&q=80) center/cover no-repeat' }}>
+      <footer className="relative mt-20 pt-24 pb-12 overflow-hidden text-white px-8 md:px-16" id="contact" style={{ background: 'linear-gradient(to top, #000 30%, rgba(0,0,0,0.95) 60%, rgba(10,30,60,0.5)), url(https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1920&q=80) center/cover no-repeat' }}>
         <div className="relative z-10 max-w-[1400px] mx-auto grid grid-cols-1 md:grid-cols-4 gap-12">
           <div className="col-span-1 md:col-span-2">
             <div className="flex items-center gap-3 mb-6">
