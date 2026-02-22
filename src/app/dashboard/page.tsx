@@ -31,6 +31,8 @@ import {
 import { useChatMessages, useTrips, useCurrentUser, useInvitations, useTyping, type Trip, type Message } from "@/hooks/useSyncRoute";
 import { useItinerary, isItineraryRequest, type ItineraryDayData } from "@/hooks/useItinerary";
 import { supabase } from "@/lib/supabase";
+import jsPDF from "jspdf";
+import { saveAs } from "file-saver";
 
 // ── ICON MAPPING for AI-generated itinerary ──────────────────────────────────
 const ICON_MAP: Record<string, React.ReactNode> = {
@@ -373,6 +375,7 @@ export default function Dashboard() {
     const [messageInput, setMessageInput] = useState("");
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [itineraryOpen, setItineraryOpen] = useState(true);
+    const [searchQuery, setSearchQuery] = useState("");
     // Swipe-to-Reply
     const [replyTo, setReplyTo] = useState<Message | null>(null);
 
@@ -583,7 +586,7 @@ export default function Dashboard() {
                             <div className="p-4 space-y-3">
                                 <div className="relative">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                    <input placeholder="Search trips…"
+                                    <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search trips…"
                                         className="w-full h-10 pl-10 pr-4 rounded-xl bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500/30 transition-colors" />
                                 </div>
                                 <button onClick={() => setModal("createTrip")}
@@ -595,7 +598,7 @@ export default function Dashboard() {
                             {/* ── WORKSPACE (pinned Safar DM) ── */}
                             <div className="px-4 pb-1">
                                 <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-1.5">Workspace</p>
-                                {trips.filter(t => t.is_workspace).map(g => (
+                                {trips.filter(t => t.is_workspace && t.name.toLowerCase().includes(searchQuery.toLowerCase())).map(g => (
                                     <div key={g.id}
                                         onClick={() => setActiveTrip(g.id)}
                                         className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${g.id === activeTrip
@@ -618,7 +621,7 @@ export default function Dashboard() {
                                 <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-1.5">Your Trips</p>
                             </div>
                             <div className="flex-1 overflow-y-auto px-2 space-y-1">
-                                {trips.filter(t => !t.is_workspace).map((g) => (
+                                {trips.filter(t => !t.is_workspace && t.name.toLowerCase().includes(searchQuery.toLowerCase())).map((g) => (
                                     <div key={g.id} className={`relative flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer ${g.id === activeTrip
                                         ? "bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20"
                                         : "hover:bg-gray-50 dark:hover:bg-white/5 border border-transparent"}`}
@@ -1055,7 +1058,32 @@ export default function Dashboard() {
                                                         className="absolute right-0 top-9 z-30 w-48 bg-white/95 dark:bg-[#1E1E1E]/95 backdrop-blur-xl border border-gray-200 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden"
                                                     >
                                                         {[
-                                                            { icon: <Download className="w-3.5 h-3.5" />, label: "Download PDF", action: () => { /* TODO: PDF logic */ } },
+                                                            {
+                                                                icon: <Download className="w-3.5 h-3.5" />, label: "Download PDF", action: () => {
+                                                                    if (aiItineraryData.length === 0) return;
+                                                                    const tripName = activeTripData?.name ?? "Trip";
+
+                                                                    // Use a hidden form POST so the browser handles the
+                                                                    // download natively via Content-Disposition header.
+                                                                    const form = document.createElement("form");
+                                                                    form.method = "POST";
+                                                                    form.action = "/api/generate-pdf";
+                                                                    form.style.display = "none";
+
+                                                                    const input = document.createElement("input");
+                                                                    input.type = "hidden";
+                                                                    input.name = "payload";
+                                                                    input.value = JSON.stringify({
+                                                                        tripName,
+                                                                        itinerary: aiItineraryData,
+                                                                    });
+
+                                                                    form.appendChild(input);
+                                                                    document.body.appendChild(form);
+                                                                    form.submit();
+                                                                    document.body.removeChild(form);
+                                                                }
+                                                            },
                                                         ].map(item => (
                                                             <button key={item.label}
                                                                 onClick={() => { item.action?.(); setOpenDropdown(null); }}

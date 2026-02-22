@@ -278,6 +278,7 @@ export function useChatMessages(tripId: string | null, currentUser: Profile | nu
     const [aiLoading, setAiLoading] = useState(false);
     const messagesRef = useRef<Message[]>([]);
     messagesRef.current = messages;
+    const processedIdsRef = useRef<Set<string>>(new Set());
 
     const toClientMsg = useCallback((m: {
         id: string; trip_id: string; sender_id: string | null; is_ai: boolean;
@@ -296,9 +297,10 @@ export function useChatMessages(tripId: string | null, currentUser: Profile | nu
     }), []);
 
     useEffect(() => {
-        if (!tripId) { setMessages([]); return; }
+        if (!tripId) { setMessages([]); processedIdsRef.current.clear(); return; }
         setLoading(true);
         setMessages([]);
+        processedIdsRef.current.clear();
 
         // Fetch historical messages
         (async () => {
@@ -322,8 +324,10 @@ export function useChatMessages(tripId: string | null, currentUser: Profile | nu
             }, async (payload) => {
                 const m = payload.new as { id: string; trip_id: string; sender_id: string | null; is_ai: boolean; content: string; created_at: string };
 
-                // Skip if this real DB id is already tracked (e.g. own message already replaced temp id)
+                // Deduplicate: skip if already processed (Set check is synchronous, unlike state)
+                if (processedIdsRef.current.has(m.id)) return;
                 if (messagesRef.current.some(ex => ex.id === m.id)) return;
+                processedIdsRef.current.add(m.id);
 
                 // For own messages: if there's a temp optimistic message with matching content + sender, replace it
                 // instead of adding a duplicate
