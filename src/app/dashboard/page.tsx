@@ -29,6 +29,26 @@ import {
     CornerUpLeft, ChevronRight, Check, CloudRain, Clock, Download, Lock, Bell
 } from "lucide-react";
 import { useChatMessages, useTrips, useCurrentUser, useInvitations, useTyping, type Trip, type Message } from "@/hooks/useSyncRoute";
+import { useItinerary, isItineraryRequest, type ItineraryDayData } from "@/hooks/useItinerary";
+import { supabase } from "@/lib/supabase";
+
+// ── ICON MAPPING for AI-generated itinerary ──────────────────────────────────
+const ICON_MAP: Record<string, React.ReactNode> = {
+    plane: <Plane className="w-3.5 h-3.5" />,
+    coffee: <Coffee className="w-3.5 h-3.5" />,
+    ship: <Ship className="w-3.5 h-3.5" />,
+    mountain: <Mountain className="w-3.5 h-3.5" />,
+    camera: <Camera className="w-3.5 h-3.5" />,
+    food: <UtensilsCrossed className="w-3.5 h-3.5" />,
+    mappin: <MapPin className="w-3.5 h-3.5" />,
+};
+const DAY_ICON_MAP: Record<number, React.ReactNode> = {
+    0: <Plane className="w-4 h-4" />,
+    1: <Mountain className="w-4 h-4" />,
+    2: <Ship className="w-4 h-4" />,
+    3: <Camera className="w-4 h-4" />,
+    4: <Coffee className="w-4 h-4" />,
+};
 
 /* ──────────────────────────────────────────────────────────────── */
 /*  TYPES                                                           */
@@ -68,36 +88,30 @@ interface ItineraryDay {
     alert?: { type: string; text: string };
 }
 
-/* ──────────────────────────────────────────────────────────────── */
-/*  INITIAL ITINERARY DATA                                          */
-/* ──────────────────────────────────────────────────────────────── */
-
-const INITIAL_ITINERARY: ItineraryDay[] = [
-    {
-        id: 1, day: "Day 1", title: "Arrival & Beach Vibes", icon: <Plane className="w-4 h-4" />, items: [
-            { time: "10:00 AM", activity: "Arrive at Goa Airport", cost: "—", icon: <Plane className="w-3.5 h-3.5" />, aiReason: "Chose Dabolim over Mopa for closer proximity to group's hotel." },
-            { time: "12:00 PM", activity: "Check-in at Beachside Resort", cost: "₹3,200", icon: <Coffee className="w-3.5 h-3.5" /> },
-            { time: "4:00 PM", activity: "Calangute Beach Sunset Walk", cost: "Free", icon: <Ship className="w-3.5 h-3.5" />, aiReason: "Selected for Mom's relaxed pace preference." },
-            { time: "8:00 PM", activity: "Seafood Dinner at Fisherman's Wharf", cost: "₹1,500", icon: <UtensilsCrossed className="w-3.5 h-3.5" /> },
-        ]
-    },
-    {
-        id: 2, day: "Day 2", title: "Adventure & Culture", icon: <Mountain className="w-4 h-4" />, items: [
-            { time: "7:00 AM", activity: "Jet Skiing at Baga Beach", cost: "₹1,800", icon: <Ship className="w-3.5 h-3.5" />, swapped: true, aiReason: "Swapped museum visit per Rahul's preference. Adventure score +2." },
-            { time: "11:00 AM", activity: "Old Goa Churches Tour", cost: "₹200", icon: <Camera className="w-3.5 h-3.5" /> },
-            { time: "4:00 PM", activity: "Spice Plantation Visit", cost: "₹600", icon: <Mountain className="w-3.5 h-3.5" /> },
-            { time: "7:00 PM", activity: "Night Market Shopping", cost: "₹1,000", icon: <MapPin className="w-3.5 h-3.5" /> },
-        ]
-    },
-    {
-        id: 3, day: "Day 3", title: "Water & Wellness", icon: <Ship className="w-4 h-4" />, items: [
-            { time: "6:30 AM", activity: "Sunrise Yoga on Beach", cost: "₹500", icon: <Coffee className="w-3.5 h-3.5" /> },
-            { time: "10:00 AM", activity: "Scuba Diving at Grande Island", cost: "₹2,500", icon: <Ship className="w-3.5 h-3.5" /> },
-            { time: "3:00 PM", activity: "Dudhsagar Waterfalls Trek", cost: "₹1,200", icon: <Mountain className="w-3.5 h-3.5" /> },
-            { time: "7:30 PM", activity: "Sunset Kayaking", cost: "₹900", icon: <Ship className="w-3.5 h-3.5" />, aiAdded: true, aiReason: "Added after skipping morning trek to align group energy levels." },
-        ]
-    },
-];
+// ── Helper: Convert AI-generated itinerary to UI format ─────────────────────
+function aiToUiItinerary(aiData: ItineraryDayData[]): ItineraryDay[] {
+    return aiData.map((day, idx) => ({
+        id: idx + 1,
+        day: day.day,
+        title: day.title,
+        icon: DAY_ICON_MAP[idx % 5] ?? <MapPin className="w-4 h-4" />,
+        items: day.items.map((item) => ({
+            time: item.time,
+            activity: item.activity,
+            cost: item.cost,
+            icon: ICON_MAP[item.icon_type] ?? <MapPin className="w-3.5 h-3.5" />,
+            disrupted: !!item.warning,
+            disruptedReplacement: item.warning ?? undefined,
+            aiReason: item.warning ?? undefined,
+        })),
+        alert: day.items.some((i) => i.warning)
+            ? {
+                type: "warning",
+                text: `⚠️ @Safar has modified activities for this day. See warnings below.`,
+            }
+            : undefined,
+    }));
+}
 
 /* ──────────────────────────────────────────────────────────────── */
 /*  SMALL REUSABLE COMPONENTS                                       */
@@ -371,9 +385,25 @@ export default function Dashboard() {
     // Dropdown menu
     const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
-    // Itinerary disruption state
-    const [itinerary, setItinerary] = useState<ItineraryDay[]>(INITIAL_ITINERARY);
-    const [activeDisruption, setActiveDisruption] = useState<string | null>(null);
+    // ── AI ITINERARY HOOK ─────────────────────────────────────────
+    const {
+        itineraryData: aiItineraryData,
+        isGeneratingItinerary,
+        activeDisruption,
+        disruptionReport,
+        liveAlerts,
+        alertsLoading,
+        generateItinerary,
+        replanFromAlert,
+    } = useItinerary(activeTrip || null);
+
+    // Derive displayed itinerary: strictly from Supabase-synced AI data
+    const itinerary: ItineraryDay[] = aiItineraryData.length > 0
+        ? aiToUiItinerary(aiItineraryData)
+        : [];
+    const hasItinerary = itinerary.length > 0;
+
+
 
     // @mention autocompl    // Mentions
     const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -414,13 +444,42 @@ export default function Dashboard() {
     const [collaboratorName, setCollaboratorName] = useState("");
 
     // ─── HANDLERS ──────────────────────────────────────────────────
-    const handleSend = () => {
+    const handleSend = async () => {
         if (!messageInput.trim()) return;
-        stopTyping(); // immediately clear typing indicator for others
-        sendMessage(messageInput.trim(), replyTo ? { username: replyTo.username, text: replyTo.text } : null);
+        const text = messageInput.trim();
+        stopTyping();
+
+        const isItinerary = isItineraryRequest(text);
+
+        // Pass skipAI=true for itinerary requests so the streaming Safar call
+        // doesn't dump a full text itinerary in the chat
+        sendMessage(text, replyTo ? { username: replyTo.username, text: replyTo.text } : null, isItinerary);
         setMessageInput("");
         setReplyTo(null);
         setMentionQuery(null);
+
+        // ── @Safar Itinerary Detection ──
+        if (isItinerary) {
+            const chatContext = messages
+                .filter(m => !m.isStreaming && m.text.trim())
+                .slice(-10)
+                .map(m => ({
+                    role: (m.isAI ? "assistant" : "user") as "user" | "assistant" | "system",
+                    content: m.text,
+                }));
+
+            const result = await generateItinerary(chatContext, text);
+
+            // Insert a clean AI confirmation message in the chat
+            if (result?.chat_reply && activeTrip) {
+                await supabase.from("messages").insert({
+                    trip_id: activeTrip,
+                    sender_id: null,
+                    content: result.chat_reply + "\n\n✅ **Your itinerary is ready!** Check the panel on the right →",
+                    is_ai: true,
+                });
+            }
+        }
     };
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -471,36 +530,6 @@ export default function Dashboard() {
         }
     };
 
-    const simulateDisruption = (type: "rain" | "delay") => {
-        if (activeDisruption === type) {
-            setItinerary(INITIAL_ITINERARY);
-            setActiveDisruption(null);
-            return;
-        }
-        setActiveDisruption(type);
-        if (type === "delay") {
-            setItinerary(prev => prev.map(day =>
-                day.id === 1 ? {
-                    ...day, alert: { type: "warning", text: "⚠️ Flight Delayed by 2hrs. @Safar has shifted Check-in and rescheduled afternoon activities." },
-                    items: day.items.map((item, i) =>
-                        i === 1 ? { ...item, disrupted: true, disruptedReplacement: "Late Check-in — Rescheduled to 3:00 PM" }
-                            : item
-                    )
-                } : day
-            ));
-        } else {
-            setItinerary(prev => prev.map(day =>
-                day.id === 3 ? {
-                    ...day, alert: { type: "rain", text: "🌧️ Heavy Rain expected on Day 3. @Safar has swapped outdoor activities for indoor alternatives." },
-                    items: day.items.map((item, i) =>
-                        i === 1 ? { ...item, disrupted: true, disruptedReplacement: "Replaced with: Goa State Museum Tour (₹200)" }
-                            : i === 2 ? { ...item, disrupted: true, disruptedReplacement: "Replaced with: Cooking Class at Spice Garden (₹800)" }
-                                : item
-                    )
-                } : day
-            ));
-        }
-    };
 
     const activeTripData2 = trips.find(t => t.id === activeTrip);
     // ─── DERIVED STATE ─────────────────────────────────────────────
@@ -566,7 +595,7 @@ export default function Dashboard() {
                             {/* ── WORKSPACE (pinned Safar DM) ── */}
                             <div className="px-4 pb-1">
                                 <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-1.5">Workspace</p>
-                                {trips.filter(t => t.id === "safarDM").map(g => (
+                                {trips.filter(t => t.is_workspace).map(g => (
                                     <div key={g.id}
                                         onClick={() => setActiveTrip(g.id)}
                                         className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${g.id === activeTrip
@@ -589,7 +618,7 @@ export default function Dashboard() {
                                 <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-1.5">Your Trips</p>
                             </div>
                             <div className="flex-1 overflow-y-auto px-2 space-y-1">
-                                {trips.filter(t => t.id !== "safarDM").map((g) => (
+                                {trips.filter(t => !t.is_workspace).map((g) => (
                                     <div key={g.id} className={`relative flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer ${g.id === activeTrip
                                         ? "bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20"
                                         : "hover:bg-gray-50 dark:hover:bg-white/5 border border-transparent"}`}
@@ -940,8 +969,68 @@ export default function Dashboard() {
                             animate={{ width: 380, opacity: 1 }}
                             exit={{ width: 0, opacity: 0 }}
                             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                            className="border-l border-gray-200 dark:border-white/5 bg-white dark:bg-[#111111] flex flex-col overflow-hidden shrink-0"
+                            className="relative border-l border-gray-200 dark:border-white/5 bg-white dark:bg-[#111111] flex flex-col overflow-hidden shrink-0"
                         >
+                            {/* ── GLASSMORPHIC LOADING OVERLAY ── */}
+                            <AnimatePresence>
+                                {isGeneratingItinerary && (
+                                    <motion.div
+                                        key="itinerary-overlay"
+                                        initial={{ opacity: 0 }}
+                                        animate={{ opacity: 1 }}
+                                        exit={{ opacity: 0 }}
+                                        transition={{ duration: 0.3 }}
+                                        className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-5"
+                                        style={{
+                                            background: "rgba(255,255,255,0.15)",
+                                            backdropFilter: "blur(18px) saturate(1.4)",
+                                            WebkitBackdropFilter: "blur(18px) saturate(1.4)",
+                                        }}
+                                    >
+                                        {/* Animated spinner ring */}
+                                        <div className="relative">
+                                            <motion.div
+                                                animate={{ rotate: 360 }}
+                                                transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                                                className="w-16 h-16 rounded-full border-[3px] border-transparent border-t-blue-500 border-r-purple-500"
+                                            />
+                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                <Sparkles className="w-6 h-6 text-blue-500" />
+                                            </div>
+                                        </div>
+
+                                        {/* Pulsating text */}
+                                        <div className="text-center px-6">
+                                            <motion.p
+                                                animate={{ opacity: [0.6, 1, 0.6] }}
+                                                transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                                                className="text-sm font-semibold text-gray-800 dark:text-white"
+                                            >
+                                                ✨ @Safar is crafting your perfect trip...
+                                            </motion.p>
+                                            <motion.p
+                                                animate={{ opacity: [0.4, 0.8, 0.4] }}
+                                                transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+                                                className="text-xs text-gray-500 dark:text-gray-400 mt-1.5"
+                                            >
+                                                Analyzing routes & live data...
+                                            </motion.p>
+                                        </div>
+
+                                        {/* Progress dots */}
+                                        <div className="flex gap-1.5">
+                                            {[0, 1, 2, 3, 4].map(i => (
+                                                <motion.div
+                                                    key={i}
+                                                    className="w-2 h-2 rounded-full bg-blue-500/60"
+                                                    animate={{ scale: [0.8, 1.3, 0.8], opacity: [0.4, 1, 0.4] }}
+                                                    transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
+                                                />
+                                            ))}
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
                             {/* Itinerary Header */}
                             <div className="p-4 border-b border-gray-200 dark:border-white/5 shrink-0">
                                 <div className="flex items-center justify-between mb-1">
@@ -980,128 +1069,200 @@ export default function Dashboard() {
                                         </div>
                                     </div>
                                 </div>
-                                <p className="text-xs text-gray-400 mb-3">Goa Trip · 4 Days · ₹12,800/person</p>
+                                {hasItinerary && (
+                                    <p className="text-xs text-gray-400 mb-3">
+                                        {`AI-Generated · ${aiItineraryData.length} Days${disruptionReport ? " · " + (disruptionReport.type === "rain" ? "🌧️ Rain Adapted" : "✈️ Delay Adjusted") : ""}`}
+                                    </p>
+                                )}
+                                {!hasItinerary && !isGeneratingItinerary && (
+                                    <p className="text-xs text-gray-400/60 mb-3">Awaiting AI generation</p>
+                                )}
 
-                                {/* Disruption Simulation Chips */}
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => simulateDisruption("rain")}
-                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer border ${activeDisruption === "rain"
-                                            ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/30"
-                                            : "bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-white/10 hover:border-blue-300"}`}>
-                                        <CloudRain className="w-3.5 h-3.5" /> Simulate Rain
-                                    </button>
-                                    <button
-                                        onClick={() => simulateDisruption("delay")}
-                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer border ${activeDisruption === "delay"
-                                            ? "bg-amber-500 text-white border-amber-500 shadow-md shadow-amber-500/30"
-                                            : "bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-white/10 hover:border-amber-300"}`}>
-                                        <Clock className="w-3.5 h-3.5" /> Flight Delay
-                                    </button>
-                                </div>
+                                {/* ── LIVE TRAVEL ALERTS ── */}
+                                {hasItinerary && liveAlerts.length > 0 && (
+                                    <div className="space-y-2 mb-1">
+                                        {liveAlerts.map(alert => (
+                                            <div
+                                                key={alert.id}
+                                                className={`flex items-start gap-2.5 p-3 rounded-xl border transition-all ${alert.severity === 'danger'
+                                                    ? 'bg-red-50 dark:bg-red-500/8 border-red-200 dark:border-red-500/20'
+                                                    : alert.severity === 'warning'
+                                                        ? 'bg-amber-50 dark:bg-amber-500/8 border-amber-200 dark:border-amber-500/20'
+                                                        : 'bg-blue-50 dark:bg-blue-500/5 border-blue-100 dark:border-blue-500/15'
+                                                    }`}
+                                            >
+                                                <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${alert.severity === 'danger'
+                                                    ? 'bg-red-100 dark:bg-red-500/15 text-red-500'
+                                                    : alert.severity === 'warning'
+                                                        ? 'bg-amber-100 dark:bg-amber-500/15 text-amber-500'
+                                                        : 'bg-blue-100 dark:bg-blue-500/15 text-blue-500'
+                                                    }`}>
+                                                    {alert.type === 'weather' ? <CloudRain className="w-3.5 h-3.5" /> : alert.type === 'flight' ? <Plane className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className={`text-xs font-bold ${alert.severity === 'danger' ? 'text-red-600 dark:text-red-400'
+                                                            : alert.severity === 'warning' ? 'text-amber-700 dark:text-amber-400'
+                                                                : 'text-blue-600 dark:text-blue-400'
+                                                            }`}>{alert.title}</p>
+                                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${alert.severity === 'danger' ? 'bg-red-100 dark:bg-red-500/20 text-red-600'
+                                                            : alert.severity === 'warning' ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-600'
+                                                                : 'bg-blue-100 dark:bg-blue-500/20 text-blue-500'
+                                                            }`}>LIVE</span>
+                                                    </div>
+                                                    <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed mt-0.5">{alert.description}</p>
+                                                    {alert.canReplan && (
+                                                        <button
+                                                            onClick={() => replanFromAlert(alert)}
+                                                            disabled={isGeneratingItinerary}
+                                                            className={`mt-1.5 flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold cursor-pointer transition-all border ${alert.severity === 'danger'
+                                                                ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-200 dark:border-red-500/20 hover:bg-red-500/20'
+                                                                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/20 hover:bg-amber-500/20'
+                                                                }`}
+                                                        >
+                                                            <Sparkles className="w-3 h-3" /> Replan Itinerary
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {hasItinerary && alertsLoading && (
+                                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-50 dark:bg-white/[0.02] border border-gray-200 dark:border-white/5 mb-1">
+                                        <div className="w-3 h-3 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                                        <p className="text-[11px] text-gray-400">Fetching live travel alerts...</p>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                                {itinerary.map((day) => (
-                                    <div key={day.id}>
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400">
-                                                {day.icon}
+                                {/* ── EMPTY STATE ── */}
+                                {!hasItinerary && !isGeneratingItinerary && (
+                                    <div className="flex flex-col items-center justify-center h-full gap-5 px-6">
+                                        <div className="relative">
+                                            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-500/10 to-purple-500/10 dark:from-blue-500/15 dark:to-purple-500/15 flex items-center justify-center border border-blue-200 dark:border-blue-500/20">
+                                                <MapPin className="w-8 h-8 text-blue-400 dark:text-blue-500" />
                                             </div>
-                                            <div>
-                                                <p className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{day.day}</p>
-                                                <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{day.title}</p>
+                                            <div className="absolute -top-1 -right-1 w-7 h-7 rounded-full bg-purple-500/10 dark:bg-purple-500/20 flex items-center justify-center border border-purple-200 dark:border-purple-500/20">
+                                                <Sparkles className="w-3.5 h-3.5 text-purple-500" />
                                             </div>
                                         </div>
+                                        <div className="text-center">
+                                            <p className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1.5">No itinerary yet</p>
+                                            <p className="text-xs text-gray-400 dark:text-gray-500 leading-relaxed max-w-[220px]">
+                                                Mention <span className="text-blue-500 font-semibold">@Safar</span> in the chat and ask it to plan your trip!
+                                            </p>
+                                        </div>
+                                        <div className="w-full max-w-[240px] p-3 rounded-2xl bg-gray-50 dark:bg-white/[0.03] border border-gray-200 dark:border-white/5">
+                                            <p className="text-[11px] text-gray-400 dark:text-gray-500 font-medium mb-1">Try saying:</p>
+                                            <p className="text-xs text-blue-500 font-medium">&ldquo;@Safar plan a 3-day trip to Goa&rdquo;</p>
+                                        </div>
+                                    </div>
+                                )}
 
-                                        {/* Alert Banner */}
-                                        <AnimatePresence>
-                                            {day.alert && (
-                                                <motion.div
-                                                    initial={{ height: 0, opacity: 0 }}
-                                                    animate={{ height: "auto", opacity: 1 }}
-                                                    className="mb-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 flex items-start gap-2 overflow-hidden"
-                                                >
-                                                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                                                    <div>
-                                                        <p className="text-xs text-amber-800 dark:text-amber-300 font-medium leading-relaxed">
-                                                            {renderWithSafar(day.alert.text)}
-                                                        </p>
-                                                        <button className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold mt-1 hover:underline cursor-pointer">View alternatives →</button>
-                                                    </div>
-                                                </motion.div>
-                                            )}
-                                        </AnimatePresence>
+                                {/* ── ITINERARY DAYS (rendered from Supabase-synced state) ── */}
+                                {hasItinerary && (<>
+                                    {itinerary.map((day) => (
+                                        <div key={day.id}>
+                                            <div className="flex items-center gap-2 mb-3">
+                                                <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                                                    {day.icon}
+                                                </div>
+                                                <div>
+                                                    <p className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{day.day}</p>
+                                                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{day.title}</p>
+                                                </div>
+                                            </div>
 
-                                        {/* Activity Timeline */}
-                                        <div className="space-y-2 pl-3 border-l-2 border-gray-200 dark:border-white/10 ml-3">
-                                            {day.items.map((item, idx) => (
-                                                <motion.div
-                                                    key={idx}
-                                                    layout
-                                                    className={`relative flex flex-col gap-1.5 p-3 rounded-xl transition-all group cursor-pointer ${item.disrupted
-                                                        ? "bg-amber-50 dark:bg-amber-500/8 border border-amber-300 dark:border-amber-500/30"
-                                                        : item.swapped
-                                                            ? "bg-blue-50/60 dark:bg-blue-500/5 border border-blue-200 dark:border-blue-500/15"
-                                                            : item.aiAdded
-                                                                ? "bg-purple-50/60 dark:bg-purple-500/5 border border-purple-200 dark:border-purple-500/15"
-                                                                : "hover:bg-gray-50 dark:hover:bg-white/[0.025] border border-transparent"}`}
-                                                >
-                                                    <div className="absolute -left-[1.15rem] top-4 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-[#111111]"
-                                                        style={{ backgroundColor: item.disrupted ? "#f59e0b" : "#3b82f6" }} />
-
-                                                    <div className="flex items-start gap-3">
-                                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${item.disrupted ? "bg-amber-100 dark:bg-amber-500/15 text-amber-600" : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-gray-400"}`}>
-                                                            {item.icon}
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex items-center gap-2 flex-wrap">
-                                                                <p className="text-xs text-gray-400 font-medium">{item.time}</p>
-                                                                {item.swapped && <span className="text-[9px] font-bold text-blue-500 bg-blue-100 dark:bg-blue-500/15 px-1.5 py-0.5 rounded">SWAPPED</span>}
-                                                                {item.aiAdded && <span className="text-[9px] font-bold text-purple-500 bg-purple-100 dark:bg-purple-500/15 px-1.5 py-0.5 rounded">AI ADDED</span>}
-                                                                {item.disrupted && <span className="text-[9px] font-bold text-amber-600 bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 rounded">DISRUPTED</span>}
-                                                            </div>
-                                                            <p className={`text-sm font-medium mt-0.5 ${item.disrupted ? "line-through text-gray-400" : "text-gray-800 dark:text-gray-200"}`}>{item.activity}</p>
-                                                            {item.disrupted && item.disruptedReplacement && (
-                                                                <p className="text-xs text-amber-700 dark:text-amber-400 font-semibold mt-0.5 flex items-center gap-1">
-                                                                    <Check className="w-3 h-3" /> {item.disruptedReplacement}
-                                                                </p>
-                                                            )}
-                                                            <p className="text-xs text-gray-400 mt-0.5">{item.cost}</p>
-                                                        </div>
-                                                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 shrink-0">
-                                                            <button className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 cursor-pointer"><Edit3 className="w-3 h-3 text-gray-400" /></button>
-                                                            <button className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 cursor-pointer"><GripVertical className="w-3 h-3 text-gray-400" /></button>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* AI Reason inline callout */}
-                                                    {item.aiReason && (
-                                                        <div className="flex items-start gap-2 px-2 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/8 border border-blue-100 dark:border-blue-500/15">
-                                                            <Sparkles className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
-                                                            <p className="text-[11px] text-blue-700 dark:text-blue-400 leading-snug">
-                                                                🤖 @Safar Decision: {item.aiReason}
+                                            {/* Alert Banner */}
+                                            <AnimatePresence>
+                                                {day.alert && (
+                                                    <motion.div
+                                                        initial={{ height: 0, opacity: 0 }}
+                                                        animate={{ height: "auto", opacity: 1 }}
+                                                        className="mb-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 flex items-start gap-2 overflow-hidden"
+                                                    >
+                                                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                                                        <div>
+                                                            <p className="text-xs text-amber-800 dark:text-amber-300 font-medium leading-relaxed">
+                                                                {renderWithSafar(day.alert.text)}
                                                             </p>
+                                                            <button className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold mt-1 hover:underline cursor-pointer">View alternatives →</button>
                                                         </div>
-                                                    )}
-                                                </motion.div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))}
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
 
-                                {/* AI Negotiation Summary Card */}
-                                <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-500/10 dark:from-blue-500/15 dark:to-purple-500/15 border border-blue-200 dark:border-blue-500/20">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <Sparkles className="w-4 h-4 text-blue-500" />
-                                        <p className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">@Safar Negotiation</p>
+                                            {/* Activity Timeline */}
+                                            <div className="space-y-2 pl-3 border-l-2 border-gray-200 dark:border-white/10 ml-3">
+                                                {day.items.map((item, idx) => (
+                                                    <motion.div
+                                                        key={idx}
+                                                        layout
+                                                        className={`relative flex flex-col gap-1.5 p-3 rounded-xl transition-all group cursor-pointer ${item.disrupted
+                                                            ? "bg-amber-50 dark:bg-amber-500/8 border border-amber-300 dark:border-amber-500/30"
+                                                            : item.swapped
+                                                                ? "bg-blue-50/60 dark:bg-blue-500/5 border border-blue-200 dark:border-blue-500/15"
+                                                                : item.aiAdded
+                                                                    ? "bg-purple-50/60 dark:bg-purple-500/5 border border-purple-200 dark:border-purple-500/15"
+                                                                    : "hover:bg-gray-50 dark:hover:bg-white/[0.025] border border-transparent"}`}
+                                                    >
+                                                        <div className="absolute -left-[1.15rem] top-4 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-[#111111]"
+                                                            style={{ backgroundColor: item.disrupted ? "#f59e0b" : "#3b82f6" }} />
+
+                                                        <div className="flex items-start gap-3">
+                                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${item.disrupted ? "bg-amber-100 dark:bg-amber-500/15 text-amber-600" : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-gray-400"}`}>
+                                                                {item.icon}
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <p className="text-xs text-gray-400 font-medium">{item.time}</p>
+                                                                    {item.swapped && <span className="text-[9px] font-bold text-blue-500 bg-blue-100 dark:bg-blue-500/15 px-1.5 py-0.5 rounded">SWAPPED</span>}
+                                                                    {item.aiAdded && <span className="text-[9px] font-bold text-purple-500 bg-purple-100 dark:bg-purple-500/15 px-1.5 py-0.5 rounded">AI ADDED</span>}
+                                                                    {item.disrupted && <span className="text-[9px] font-bold text-amber-600 bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 rounded">DISRUPTED</span>}
+                                                                </div>
+                                                                <p className={`text-sm font-medium mt-0.5 ${item.disrupted ? "line-through text-gray-400" : "text-gray-800 dark:text-gray-200"}`}>{item.activity}</p>
+                                                                {item.disrupted && item.disruptedReplacement && (
+                                                                    <p className="text-xs text-amber-700 dark:text-amber-400 font-semibold mt-0.5 flex items-center gap-1">
+                                                                        <Check className="w-3 h-3" /> {item.disruptedReplacement}
+                                                                    </p>
+                                                                )}
+                                                                <p className="text-xs text-gray-400 mt-0.5">{item.cost}</p>
+                                                            </div>
+                                                            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 shrink-0">
+                                                                <button className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 cursor-pointer"><Edit3 className="w-3 h-3 text-gray-400" /></button>
+                                                                <button className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 cursor-pointer"><GripVertical className="w-3 h-3 text-gray-400" /></button>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* AI Reason inline callout */}
+                                                        {item.aiReason && (
+                                                            <div className="flex items-start gap-2 px-2 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-500/8 border border-blue-100 dark:border-blue-500/15">
+                                                                <Sparkles className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
+                                                                <p className="text-[11px] text-blue-700 dark:text-blue-400 leading-snug">
+                                                                    🤖 @Safar Decision: {item.aiReason}
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </motion.div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+
+                                    {/* AI Negotiation Summary Card */}
+                                    <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-500/10 dark:from-blue-500/15 dark:to-purple-500/15 border border-blue-200 dark:border-blue-500/20">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Sparkles className="w-4 h-4 text-blue-500" />
+                                            <p className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">@Safar AI-Generated Plan</p>
+                                        </div>
+                                        <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                                            This itinerary was generated by <span className="text-blue-500 font-semibold">@Safar</span> based on your
+                                            group&apos;s preferences. Use the simulation buttons above to test disruption handling.
+                                        </p>
                                     </div>
-                                    <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
-                                        Skipped early morning trek to align with group&apos;s energy levels; added{" "}
-                                        <span className="text-purple-500 font-semibold">Sunset Kayaking</span> instead.
-                                        Rahul&apos;s adventure score: 9/10 · Mom&apos;s comfort score: 8/10.
-                                    </p>
-                                </div>
+                                </>)}
                             </div>
                         </motion.aside>
                     )}

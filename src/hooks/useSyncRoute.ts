@@ -469,7 +469,8 @@ export function useChatMessages(tripId: string | null, currentUser: Profile | nu
 
     const sendMessage = useCallback(async (
         text: string,
-        replyTo?: { username: string; text: string } | null
+        replyTo?: { username: string; text: string } | null,
+        skipAI?: boolean
     ) => {
         if (!tripId || !currentUser || !text.trim()) return;
 
@@ -504,7 +505,8 @@ export function useChatMessages(tripId: string | null, currentUser: Profile | nu
         }
 
         // AI trigger: @Safar keyword OR workspace (every msg goes to AI)
-        const shouldCallAI = isWorkspace || /\@Safar\b/i.test(text);
+        // Skip if caller already handles it (e.g. itinerary generation uses its own endpoint)
+        const shouldCallAI = !skipAI && (isWorkspace || /\@Safar\b/i.test(text));
         if (shouldCallAI) await callSafar(text);
     }, [tripId, currentUser, isWorkspace, callSafar]);
 
