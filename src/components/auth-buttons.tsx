@@ -449,6 +449,7 @@ function AuthButtonsInner() {
                 position="top-center"
                 containerStyle={{ zIndex: 99999 }}
                 toastOptions={{
+                    duration: 2500,
                     style: {
                         background: "#1a1a1a",
                         color: "#f3f4f6",
