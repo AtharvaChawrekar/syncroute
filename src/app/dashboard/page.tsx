@@ -26,7 +26,8 @@ import {
     Settings, Plane, GripVertical, MessageSquare, Users,
     Edit3, Coffee, Mountain, Ship, Camera, UtensilsCrossed,
     X, MoreVertical, Pin, Share2, Trash2, Type, UserPlus,
-    CornerUpLeft, ChevronRight, Check, CloudRain, Clock, Download, Lock, Bell
+    CornerUpLeft, ChevronRight, Check, CloudRain, Clock, Download, Lock, Bell,
+    Eye
 } from "lucide-react";
 import { useChatMessages, useTrips, useCurrentUser, useInvitations, useTyping, type Trip, type Message } from "@/hooks/useSyncRoute";
 import { useItinerary, isItineraryRequest, type ItineraryDayData } from "@/hooks/useItinerary";
@@ -556,6 +557,13 @@ export default function Dashboard() {
                         <span className="font-heading text-xl tracking-[0.15em] text-[#1A1A1A] dark:text-white hidden sm:inline">SYNC<span className="text-blue-500">ROUTE</span></span>
                     </a>
                 </div>
+                <a
+                    href="/immersive-preview"
+                    className="virtual-tour-btn flex items-center gap-2.5 px-7 py-2.5 rounded-xl bg-[#0D0D0D] dark:bg-[#1A1A1A] text-white text-sm font-semibold tracking-wide cursor-pointer transition-all hover:scale-105 shadow-lg"
+                >
+                    <Eye className="w-4.5 h-4.5 text-blue-400" />
+                    <span>Virtual Tour</span>
+                </a>
                 <div className="flex items-center gap-2">
                     <ModeToggle />
                     <button onClick={() => setItineraryOpen(!itineraryOpen)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 transition-colors cursor-pointer">
@@ -1259,6 +1267,7 @@ export default function Dashboard() {
                                                                 <p className="text-xs text-gray-400 mt-0.5">{item.cost}</p>
                                                             </div>
                                                             <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 shrink-0">
+                                                                <a href="/immersive-preview" title="360° View" className="p-1 rounded hover:bg-blue-100 dark:hover:bg-blue-500/15 cursor-pointer transition-colors"><Eye className="w-3 h-3 text-blue-500" /></a>
                                                                 <button className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 cursor-pointer"><Edit3 className="w-3 h-3 text-gray-400" /></button>
                                                                 <button className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/10 cursor-pointer"><GripVertical className="w-3 h-3 text-gray-400" /></button>
                                                             </div>
