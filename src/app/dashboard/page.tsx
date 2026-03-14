@@ -28,13 +28,15 @@ import {
     Edit3, Coffee, Mountain, Ship, Camera, UtensilsCrossed,
     X, MoreVertical, Pin, Share2, Trash2, Type, UserPlus,
     CornerUpLeft, ChevronRight, Check, CloudRain, Clock, Download, Lock, Bell,
-    Eye
+    Eye, BarChart3
 } from "lucide-react";
 import { useChatMessages, useTrips, useCurrentUser, useInvitations, useTyping, type Trip, type Message } from "@/hooks/useSyncRoute";
 import { useItinerary, isItineraryRequest, type ItineraryDayData } from "@/hooks/useItinerary";
 import { supabase } from "@/lib/supabase";
 import jsPDF from "jspdf";
 import { saveAs } from "file-saver";
+import TripComparisonModal from "@/components/trip-comparison";
+import TravelResearchPanel from "@/components/travel-research";
 
 // ── ICON MAPPING for AI-generated itinerary ──────────────────────────────────
 const ICON_MAP: Record<string, React.ReactNode> = {
@@ -431,6 +433,8 @@ export default function Dashboard() {
         "createTrip" | "profile" | "addCollaborator" | "groupSettings" | "invitations" | null
     >(null);
     const [showUserMenu, setShowUserMenu] = useState(false);
+    const [showComparison, setShowComparison] = useState(false);
+    const [showResearch, setShowResearch] = useState(false);
     const router = useRouter();
 
     // Invitations (real Supabase)
@@ -559,6 +563,14 @@ export default function Dashboard() {
                         <img src="/logo.png" alt="SyncRoute" className="h-7 w-7 object-contain" />
                         <span className="font-heading text-xl tracking-[0.15em] text-[#1A1A1A] dark:text-white hidden sm:inline">SYNC<span className="text-blue-500">ROUTE</span></span>
                     </a>
+
+                    <button
+                        onClick={() => setShowResearch(true)}
+                        className="hidden md:flex items-center gap-2 px-3 py-1.5 ml-2 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-xs font-bold border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer shadow-sm"
+                    >
+                        <Search className="w-3.5 h-3.5" />
+                        <span>AI Research</span>
+                    </button>
                 </div>
                 <a
                     href="/immersive-preview"
@@ -992,6 +1004,14 @@ export default function Dashboard() {
                                     className="w-full h-12 px-5 rounded-2xl bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-800 dark:text-gray-200 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500/30 transition-all"
                                 />
                             </div>
+                            <motion.button
+                                whileTap={{ scale: 0.9 }}
+                                onClick={() => setShowComparison(true)}
+                                className="p-3.5 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 transition-all cursor-pointer shadow-lg shadow-orange-500/20 shrink-0"
+                                title="Compare Trip Options"
+                            >
+                                <BarChart3 className="w-5 h-5 text-white" />
+                            </motion.button>
                             <motion.button
                                 whileTap={{ scale: 0.9 }}
                                 onClick={handleSend}
@@ -1581,6 +1601,18 @@ export default function Dashboard() {
                     </button>
                 </div>
             </Modal>
+            {/* ═══════ TRIP COMPARISON MODAL ═══════ */}
+            <TripComparisonModal
+                open={showComparison}
+                onClose={() => setShowComparison(false)}
+                onApply={(id) => { setShowComparison(false); }}
+            />
+
+            {/* ═══════ TRAVEL RESEARCH PANEL ═══════ */}
+            <TravelResearchPanel
+                open={showResearch}
+                onClose={() => setShowResearch(false)}
+            />
         </div>
     );
 }

@@ -1,19 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     ArrowLeft, Eye, MapPin, Star, Navigation, Smartphone,
     ChevronRight, Clock, Sparkles,
     Plane, Coffee, Mountain, Ship, Camera, UtensilsCrossed,
 } from "lucide-react";
-
-/* ──────────────────────────────────────────────────────────────── */
-/*  LEAFLET DYNAMIC IMPORTS (client-only)                            */
-/* ──────────────────────────────────────────────────────────────── */
-
-import "leaflet/dist/leaflet.css";
-import type L from "leaflet";
 
 /* ──────────────────────────────────────────────────────────────── */
 /*  DATA                                                             */
@@ -59,139 +52,209 @@ const ALL_ITEMS = ITINERARY.flatMap((d) => d.items);
 const DAY_COLORS = ["#3b82f6", "#8b5cf6", "#06b6d4"];
 
 /* ──────────────────────────────────────────────────────────────── */
+/*  Smooth fly-to animation using Google Maps                       */
+/* ──────────────────────────────────────────────────────────────── */
+
+function cubicEase(t: number) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function smoothFlyTo(
+    map: google.maps.Map,
+    target: { lat: number; lng: number },
+    onDone?: () => void,
+) {
+    const start = map.getCenter()!;
+    const startLat = start.lat();
+    const startLng = start.lng();
+    const startZoom = map.getZoom() ?? 15;
+    const startTilt = map.getTilt() ?? 45;
+    const startHeading = map.getHeading() ?? 0;
+
+    const midZoom = 12;
+    const endZoom = 17;
+    const endTilt = 55;
+
+    const dLat = target.lat - startLat;
+    const dLng = target.lng - startLng;
+    const targetHeading = (Math.atan2(dLng, dLat) * 180) / Math.PI;
+
+    const duration = 2400;
+    const t0 = performance.now();
+
+    function tick(now: number) {
+        const elapsed = now - t0;
+        const raw = Math.min(elapsed / duration, 1);
+        const t = cubicEase(raw);
+
+        let zoom: number, tilt: number, heading: number, lat: number, lng: number;
+
+        if (t < 0.35) {
+            const p = t / 0.35;
+            zoom = startZoom + (midZoom - startZoom) * p;
+            tilt = startTilt + (0 - startTilt) * p;
+            heading = startHeading;
+            lat = startLat;
+            lng = startLng;
+        } else if (t < 0.7) {
+            const p = (t - 0.35) / 0.35;
+            zoom = midZoom;
+            tilt = 0;
+            heading = startHeading + (targetHeading - startHeading) * p;
+            lat = startLat + dLat * p;
+            lng = startLng + dLng * p;
+        } else {
+            const p = (t - 0.7) / 0.3;
+            zoom = midZoom + (endZoom - midZoom) * p;
+            tilt = 0 + endTilt * p;
+            heading = targetHeading;
+            lat = target.lat;
+            lng = target.lng;
+        }
+
+        map.moveCamera({ center: { lat, lng }, zoom, tilt, heading });
+
+        if (raw < 1) {
+            requestAnimationFrame(tick);
+        } else {
+            onDone?.();
+        }
+    }
+
+    requestAnimationFrame(tick);
+}
+
+/* ──────────────────────────────────────────────────────────────── */
 /*  PAGE                                                             */
 /* ──────────────────────────────────────────────────────────────── */
 
 export default function ImmersivePreview() {
     const [activeItemId, setActiveItemId] = useState(ALL_ITEMS[0].id);
     const [expandedDays, setExpandedDays] = useState<string[]>(["Day 1", "Day 2", "Day 3"]);
-    const [viewMode, setViewMode] = useState<"satellite" | "dark">("satellite");
+    const [viewMode, setViewMode] = useState<"earth" | "street">("earth");
     const [isFlying, setIsFlying] = useState(false);
     const [mapReady, setMapReady] = useState(false);
 
     const mapEl = useRef<HTMLDivElement>(null);
-    const mapObj = useRef<L.Map | null>(null);
-    const markersRef = useRef<L.CircleMarker[]>([]);
-    const activeGlowRef = useRef<L.CircleMarker | null>(null);
-    const leafletRef = useRef<typeof L | null>(null);
-    const tileLayerRef = useRef<L.TileLayer | null>(null);
+    const mapObj = useRef<google.maps.Map | null>(null);
+    const panoEl = useRef<HTMLDivElement>(null);
+    const panoObj = useRef<google.maps.StreetViewPanorama | null>(null);
+    const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+    const activeGlowRef = useRef<google.maps.Circle | null>(null);
 
     const active = ALL_ITEMS.find((i) => i.id === activeItemId) ?? ALL_ITEMS[0];
+    const mapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || "";
 
-    /* ── TILE URLS ──────────────────────────────────────────────── */
-    const TILES = {
-        satellite: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    };
-
-    /* ── Initialize Leaflet map ─────────────────────────────────── */
+    /* ── Load Google Maps script ────────────────────────────────── */
     useEffect(() => {
+        if (!mapsApiKey) return;
+        if (document.querySelector("script[src*='maps.googleapis.com']")) return;
+
+        const script = document.createElement("script");
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=marker&v=weekly`;
+        script.async = true;
+        script.defer = true;
+        script.onload = () => initMap();
+        document.head.appendChild(script);
+
+        return () => {
+            // Cleanup not really needed for Google Maps script
+        };
+    }, [mapsApiKey]);
+
+    /* ── Initialize map ─────────────────────────────────────────── */
+    const initMap = useCallback(() => {
         if (!mapEl.current || mapObj.current) return;
 
-        // Dynamic import leaflet (client-only)
-        import("leaflet").then((L) => {
-            leafletRef.current = L;
-
-            const map = L.map(mapEl.current!, {
-                center: [active.lat, active.lng],
-                zoom: 16,
-                zoomControl: false,
-                attributionControl: false,
-            });
-
-            // Satellite tile layer
-            const tileLayer = L.tileLayer(TILES.satellite, {
-                maxZoom: 19,
-            }).addTo(map);
-            tileLayerRef.current = tileLayer;
-
-            // Attribution (small, bottom-right)
-            L.control.attribution({ position: "bottomright", prefix: false })
-                .addAttribution('Tiles © Esri')
-                .addTo(map);
-
-            mapObj.current = map;
-
-            // ── Route polyline ──
-            const routeCoords = ALL_ITEMS.map((i) => [i.lat, i.lng] as [number, number]);
-            L.polyline(routeCoords, {
-                color: "#3b82f6",
-                weight: 3,
-                opacity: 0.8,
-                dashArray: "8 6",
-                lineCap: "round",
-            }).addTo(map);
-
-            // ── Markers for all stops ──
-            ITINERARY.forEach((day, di) => {
-                const color = DAY_COLORS[di % DAY_COLORS.length];
-                day.items.forEach((item, ii) => {
-                    const isFirst = item.id === ALL_ITEMS[0].id;
-
-                    // Outer glow circle (subtle)
-                    L.circleMarker([item.lat, item.lng], {
-                        radius: 16,
-                        fillColor: color,
-                        fillOpacity: 0.15,
-                        color: color,
-                        weight: 1,
-                        opacity: 0.3,
-                    }).addTo(map);
-
-                    // Main marker
-                    const marker = L.circleMarker([item.lat, item.lng], {
-                        radius: isFirst ? 10 : 7,
-                        fillColor: isFirst ? "#3b82f6" : color,
-                        fillOpacity: isFirst ? 1 : 0.7,
-                        color: "#ffffff",
-                        weight: isFirst ? 3 : 2,
-                    }).addTo(map);
-
-                    // Label
-                    const label = L.divIcon({
-                        className: "custom-marker-label",
-                        html: `<div style="
-                            font-size:10px;font-weight:700;color:#fff;
-                            background:${color};
-                            width:20px;height:20px;border-radius:50%;
-                            display:flex;align-items:center;justify-content:center;
-                            border:2px solid rgba(255,255,255,0.9);
-                            box-shadow:0 2px 8px rgba(0,0,0,0.4);
-                            transform:translate(-10px,-10px);
-                        ">${ii + 1}</div>`,
-                    });
-                    L.marker([item.lat, item.lng], { icon: label, interactive: true })
-                        .addTo(map)
-                        .on("click", () => setActiveItemId(item.id));
-
-                    marker.on("click", () => setActiveItemId(item.id));
-                    markersRef.current.push(marker);
-                });
-            });
-
-            // ── Active glow marker ──
-            const glow = L.circleMarker([active.lat, active.lng], {
-                radius: 20,
-                fillColor: "#3b82f6",
-                fillOpacity: 0.25,
-                color: "#3b82f6",
-                weight: 2,
-                opacity: 0.6,
-            }).addTo(map);
-            activeGlowRef.current = glow;
-
-            setMapReady(true);
+        const map = new google.maps.Map(mapEl.current, {
+            center: { lat: active.lat, lng: active.lng },
+            zoom: 16,
+            tilt: 45,
+            heading: active.heading,
+            mapTypeId: "hybrid",
+            mapId: "immersive_satellite",
+            disableDefaultUI: true,
+            gestureHandling: "greedy",
+            zoomControl: false,
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: false,
         });
-    }, []);
 
-    /* ── Switch tile layer on mode change ──────────────────────── */
+        mapObj.current = map;
+
+        // ── Route polyline ──
+        const routePath = ALL_ITEMS.map((i) => ({ lat: i.lat, lng: i.lng }));
+        new google.maps.Polyline({
+            path: routePath,
+            geodesic: true,
+            strokeColor: "#3b82f6",
+            strokeOpacity: 0.8,
+            strokeWeight: 3,
+            icons: [{
+                icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3, strokeColor: "#60a5fa", fillColor: "#60a5fa", fillOpacity: 1 },
+                offset: "0",
+                repeat: "80px",
+            }],
+            map,
+        });
+
+        // ── Markers for all stops ──
+        ITINERARY.forEach((day, di) => {
+            const color = DAY_COLORS[di % DAY_COLORS.length];
+            day.items.forEach((item, ii) => {
+                const isFirst = item.id === ALL_ITEMS[0].id;
+
+                // Numbered label marker
+                const el = document.createElement("div");
+                el.innerHTML = `<div style="
+                    font-size:11px;font-weight:700;color:#fff;
+                    background:${color};
+                    width:${isFirst ? 28 : 22}px;height:${isFirst ? 28 : 22}px;border-radius:50%;
+                    display:flex;align-items:center;justify-content:center;
+                    border:2.5px solid rgba(255,255,255,0.9);
+                    box-shadow:0 2px 8px rgba(0,0,0,0.4)${isFirst ? `,0 0 16px ${color}80` : ""};
+                    transition:all 0.3s ease;
+                    cursor:pointer;
+                ">${ii + 1}</div>`;
+
+                const marker = new google.maps.marker.AdvancedMarkerElement({
+                    position: { lat: item.lat, lng: item.lng },
+                    map,
+                    content: el,
+                    title: item.activity,
+                });
+
+                marker.addListener("click", () => {
+                    setActiveItemId(item.id);
+                });
+
+                markersRef.current.push(marker);
+            });
+        });
+
+        // ── Active location glow circle ──
+        const glow = new google.maps.Circle({
+            center: { lat: active.lat, lng: active.lng },
+            radius: 150,
+            fillColor: "#3b82f6",
+            fillOpacity: 0.12,
+            strokeColor: "#3b82f6",
+            strokeWeight: 1.5,
+            strokeOpacity: 0.3,
+            map,
+        });
+        activeGlowRef.current = glow;
+
+        setMapReady(true);
+    }, [active.lat, active.lng, active.heading]);
+
+    // If google maps is already loaded (e.g. hot reload)
     useEffect(() => {
-        if (!mapObj.current || !leafletRef.current || !tileLayerRef.current) return;
-        const L = leafletRef.current;
-        tileLayerRef.current.remove();
-        const newLayer = L.tileLayer(TILES[viewMode], { maxZoom: 19 }).addTo(mapObj.current);
-        tileLayerRef.current = newLayer;
-    }, [viewMode]);
+        if (typeof google !== "undefined" && google.maps && !mapObj.current) {
+            initMap();
+        }
+    }, [initMap]);
 
     /* ── Fly to on item change ─────────────────────────────────── */
     useEffect(() => {
@@ -199,43 +262,73 @@ export default function ImmersivePreview() {
         const map = mapObj.current;
 
         setIsFlying(true);
-        map.flyTo([active.lat, active.lng], 17, {
-            duration: 2.0,
-            easeLinearity: 0.2,
+        smoothFlyTo(map, { lat: active.lat, lng: active.lng }, () => {
+            setIsFlying(false);
         });
 
-        // Update active glow
+        // Update glow circle
         if (activeGlowRef.current) {
-            activeGlowRef.current.setLatLng([active.lat, active.lng]);
+            activeGlowRef.current.setCenter({ lat: active.lat, lng: active.lng });
         }
 
         // Update marker styles
-        markersRef.current.forEach((m, idx) => {
-            const item = ALL_ITEMS[idx];
-            const dayIndex = ITINERARY.findIndex((d) => d.items.some((i) => i.id === item.id));
-            const isActive = item.id === active.id;
-            m.setStyle({
-                radius: isActive ? 10 : 7,
-                fillColor: isActive ? "#3b82f6" : DAY_COLORS[dayIndex % DAY_COLORS.length],
-                fillOpacity: isActive ? 1 : 0.6,
-                weight: isActive ? 3 : 2,
+        let idx = 0;
+        ITINERARY.forEach((day, di) => {
+            const color = DAY_COLORS[di % DAY_COLORS.length];
+            day.items.forEach((item, ii) => {
+                const marker = markersRef.current[idx];
+                if (marker) {
+                    const isActive = item.id === active.id;
+                    const el = document.createElement("div");
+                    el.innerHTML = `<div style="
+                        font-size:${isActive ? 12 : 11}px;font-weight:700;color:#fff;
+                        background:${isActive ? "#3b82f6" : color};
+                        width:${isActive ? 30 : 22}px;height:${isActive ? 30 : 22}px;border-radius:50%;
+                        display:flex;align-items:center;justify-content:center;
+                        border:2.5px solid rgba(255,255,255,0.9);
+                        box-shadow:0 2px 8px rgba(0,0,0,0.4)${isActive ? ",0 0 20px #3b82f680" : ""};
+                        transition:all 0.3s ease;
+                        cursor:pointer;
+                    ">${ii + 1}</div>`;
+                    marker.content = el;
+                }
+                idx++;
             });
         });
 
-        const timer = setTimeout(() => setIsFlying(false), 2200);
-        return () => clearTimeout(timer);
+        // Update street view if in street mode
+        if (viewMode === "street" && panoObj.current) {
+            panoObj.current.setPosition({ lat: active.lat, lng: active.lng });
+            panoObj.current.setPov({ heading: active.heading, pitch: 5 });
+        }
     }, [activeItemId, mapReady]);
+
+    /* ── Street view toggle ─────────────────────────────────────── */
+    useEffect(() => {
+        if (viewMode === "street" && panoEl.current && !panoObj.current) {
+            panoObj.current = new google.maps.StreetViewPanorama(panoEl.current, {
+                position: { lat: active.lat, lng: active.lng },
+                pov: { heading: active.heading, pitch: 5 },
+                disableDefaultUI: true,
+                showRoadLabels: false,
+            });
+        }
+        if (viewMode === "street" && panoObj.current) {
+            panoObj.current.setPosition({ lat: active.lat, lng: active.lng });
+            panoObj.current.setPov({ heading: active.heading, pitch: 5 });
+        }
+    }, [viewMode, active]);
 
     const toggleDay = (day: string) => setExpandedDays((p) => p.includes(day) ? p.filter((d) => d !== day) : [...p, day]);
     const vibeLabel = (r: number) => r >= 4.8 ? "Incredible" : r >= 4.5 ? "Amazing" : r >= 4.0 ? "Great" : "Good";
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || "";
 
     /* ── RENDER ──────────────────────────────────────────────────── */
     return (
         <div className="relative h-screen w-screen overflow-hidden bg-[#0a0a0a] font-sans select-none">
 
-            {/* ═══════ MAP ═══════ */}
-            <div ref={mapEl} id="immersive-map-container" className="absolute inset-0 z-0" />
+            {/* ═══════ MAP BACKGROUND ═══════ */}
+            <div ref={mapEl} id="immersive-map-container" className="absolute inset-0 z-0" style={{ display: viewMode === "earth" ? "block" : "none" }} />
+            <div ref={panoEl} id="immersive-pano-container" className="absolute inset-0 z-0" style={{ display: viewMode === "street" ? "block" : "none" }} />
 
             {/* Loading overlay */}
             {!mapReady && (
@@ -245,6 +338,19 @@ export default function ImmersivePreview() {
                             <Eye className="w-7 h-7 text-blue-500/60" />
                         </motion.div>
                         <p className="text-white/40 text-sm font-medium">Loading Immersive View…</p>
+                    </div>
+                </div>
+            )}
+
+            {/* No API key fallback */}
+            {!mapsApiKey && (
+                <div className="absolute inset-0 z-[2] bg-gradient-to-br from-[#0a0f1a] via-[#0d1117] to-[#0a0a0a] flex items-center justify-center">
+                    <div className="text-center max-w-md px-6">
+                        <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-red-500/10 flex items-center justify-center border border-red-500/20">
+                            <MapPin className="w-7 h-7 text-red-400" />
+                        </div>
+                        <h2 className="text-white text-lg font-semibold mb-2">Google Maps API Key Required</h2>
+                        <p className="text-white/40 text-sm">Add <code className="text-blue-400 bg-white/5 px-1.5 py-0.5 rounded">NEXT_PUBLIC_GOOGLE_MAPS_KEY</code> to your <code className="text-blue-400 bg-white/5 px-1.5 py-0.5 rounded">.env.local</code> file and enable the Maps JavaScript API in Google Cloud Console.</p>
                     </div>
                 </div>
             )}
@@ -287,8 +393,8 @@ export default function ImmersivePreview() {
                     </h1>
                 </div>
                 <div className="flex items-center rounded-xl p-1 gap-0.5" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                    <button onClick={() => setViewMode("satellite")} className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${viewMode === "satellite" ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30" : "text-white/50 hover:text-white/80"}`}>🛰️ Satellite</button>
-                    <button onClick={() => setViewMode("dark")} className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${viewMode === "dark" ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30" : "text-white/50 hover:text-white/80"}`}>🌙 Dark Map</button>
+                    <button onClick={() => setViewMode("earth")} className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${viewMode === "earth" ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30" : "text-white/50 hover:text-white/80"}`}>🌍 Earth View</button>
+                    <button onClick={() => setViewMode("street")} className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${viewMode === "street" ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30" : "text-white/50 hover:text-white/80"}`}>🚶 Street Walk</button>
                 </div>
             </motion.header>
 
@@ -369,20 +475,20 @@ export default function ImmersivePreview() {
                     animate={{ y: 0, opacity: 1, scale: 1 }}
                     exit={{ y: 10, opacity: 0, scale: 0.98 }}
                     transition={{ type: "spring", stiffness: 320, damping: 28 }}
-                    className="absolute bottom-6 right-4 z-20 w-[340px] rounded-2xl overflow-hidden"
+                    className="absolute bottom-6 right-4 z-20 w-[360px] rounded-2xl overflow-hidden"
                     style={{ background: "rgba(10,10,10,0.6)", backdropFilter: "blur(28px) saturate(1.6)", WebkitBackdropFilter: "blur(28px) saturate(1.6)", border: "1px solid rgba(255,255,255,0.08)" }}
                 >
                     {/* Street View thumbnail */}
-                    <div className="relative h-32 overflow-hidden bg-gradient-to-br from-blue-900/30 to-purple-900/30">
-                        {apiKey && (
+                    <div className="relative h-36 overflow-hidden bg-gradient-to-br from-blue-900/30 to-purple-900/30">
+                        {mapsApiKey && (
                             <img
-                                src={`https://maps.googleapis.com/maps/api/streetview?size=680x300&location=${active.lat},${active.lng}&heading=${active.heading}&pitch=5&fov=90&key=${apiKey}`}
+                                src={`https://maps.googleapis.com/maps/api/streetview?size=720x320&location=${active.lat},${active.lng}&heading=${active.heading}&pitch=5&fov=90&key=${mapsApiKey}`}
                                 alt={active.activity}
                                 className="w-full h-full object-cover"
                                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                             />
                         )}
-                        {!apiKey && (
+                        {!mapsApiKey && (
                             <div className="w-full h-full flex items-center justify-center">
                                 <Camera className="w-8 h-8 text-white/15" />
                             </div>
@@ -400,7 +506,7 @@ export default function ImmersivePreview() {
                     </div>
 
                     <div className="p-4">
-                        <h3 className="text-white font-semibold text-sm mb-1">{active.activity}</h3>
+                        <h3 className="text-white font-semibold text-[15px] mb-1.5">{active.activity}</h3>
                         <div className="flex items-center gap-4 text-[11px] text-white/40 mb-3">
                             <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{active.time}</span>
                             <span className="flex items-center gap-1"><Navigation className="w-3 h-3" />{active.distance}</span>
@@ -427,7 +533,7 @@ export default function ImmersivePreview() {
                 style={{ background: "rgba(10,10,10,0.5)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.06)" }}
             >
                 <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                <span className="text-white/40 text-[11px] font-medium">{viewMode === "satellite" ? "🛰️ Satellite" : "🌙 Dark Map"} · Live</span>
+                <span className="text-white/40 text-[11px] font-medium">{viewMode === "earth" ? "Earth View" : "Street Walk"} · Live</span>
             </motion.div>
         </div>
     );
